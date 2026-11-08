@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeslaScreen · Diagnóstico</title>
+<style>
+:root{--bg:#14181d;--panel:#1d232a;--line:#323a44;--fg:#eef1f4;--muted:#9aa6b2;--accent:#f07a2e;--ok:#5fd08a;--bad:#ff7a6e;--warn:#f2c35b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:20px max(16px,env(safe-area-inset-left,0px))}
+h1{font-size:30px;margin:0 0 4px}
+h2{font-size:20px;margin:0 0 10px}
+p{margin:0 0 10px;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+.test canvas,.test video{width:100%;aspect-ratio:16/9;background:#000;display:block;border-radius:4px}
+.estado{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.pill{display:inline-block;padding:1px 10px;border-radius:999px;font-weight:600;font-size:15px}
+.ok{background:#1f3b2a;color:var(--ok)}.bad{background:#40211e;color:var(--bad)}.warn{background:#3d3218;color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:16px}
+td{padding:5px 0;border-bottom:1px solid var(--line);vertical-align:top}
+td:last-child{text-align:right;word-break:break-all;padding-left:10px}
+button{font:inherit;background:var(--accent);color:#111;border:0;border-radius:6px;padding:10px 18px;font-weight:600;cursor:pointer}
+button.sec{background:var(--line);color:var(--fg)}
+.botones{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+#registro{font:15px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:320px;overflow:auto;white-space:pre-wrap}
+#tactil{height:120px;border:2px dashed var(--line);border-radius:8px;display:grid;place-items:center;color:var(--muted);touch-action:none;user-select:none}
+</style>
+</head>
+<body>
+<h1>TeslaScreen · Diagnóstico del navegador</h1>
+<p>Comprueba qué admite el navegador del coche y si el vídeo sigue en movimiento al pasar de P a D y al circular. Si una prueba se congela, queda anotado en el registro con la hora.</p>
+<div class="botones">
+  <button id="empezar">Empezar las pruebas</button>
+  <button class="sec" id="completa">Pantalla completa (prueba A)</button>
+  <button class="sec" id="marca">Anotar «ahora en D»</button>
+  <button class="sec" id="marca2">Anotar «ahora circulando»</button>
+</div>
+
+<div class="grid">
+  <div class="card test" id="cardA">
+    <h2>A · WebCodecs → canvas</h2>
+    <p>Así mostraría la app el vídeo del iPhone.</p>
+    <canvas id="lienzo" width="1280" height="720"></canvas>
+    <div class="estado"><span id="estA" class="pill warn">sin empezar</span><span id="datosA"></span></div>
+  </div>
+  <div class="card test">
+    <h2>B · Media Source → vídeo</h2>
+    <p>Alternativa si no hay WebCodecs.</p>
+    <video id="videoB" muted playsinline></video>
+    <div class="estado"><span id="estB" class="pill warn">sin empezar</span><span id="datosB"></span></div>
+  </div>
+  <div class="card test">
+    <h2>C · Vídeo normal</h2>
+    <p>Como un vídeo de una web cualquiera.</p>
+    <video id="videoC" muted playsinline loop></video>
+    <div class="estado"><span id="estC" class="pill warn">sin empezar</span><span id="datosC"></span></div>
+  </div>
+  <div class="card">
+    <h2>Navegador</h2>
+    <table id="tabla"></table>
+  </div>
+  <div class="card">
+    <h2>Toques</h2>
+    <p>Toca y arrastra aquí: comprueba que la página recibe los toques (para el control desde la pantalla en Android).</p>
+    <div id="tactil">sin toques</div>
+  </div>
+  <div class="card">
+    <h2>Registro</h2>
+    <div id="registro"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const CODEC = "avc1.42C01F", ANCHO = 1280, ALTO = 720, FPS = 30;
+const CONGELADO_MS = 700;
+
+function hora() { return new Date().toLocaleTimeString("es-ES", { hour12: false }); }
+function anotar(texto) {
+  const r = $("registro");
+  r.textContent = hora() + "  " + texto + "\n" + r.textContent;
+}
+function estado(id, texto, clase) { const e = $(id); e.textContent = texto; e.className = "pill " + clase; }
+
+// ---------- Datos del navegador ----------
+async function rellenarTabla() {
+  const filas = [];
+  const ua = navigator.userAgent;
+  const chrome = (ua.match(/Chrom(?:e|ium)\/([\d.]+)/) || [])[1] || "no aparece";
+  filas.push(["Versión de Chrome", chrome]);
+  filas.push(["Pantalla", screen.width + "×" + screen.height + " · ventana " + innerWidth + "×" + innerHeight + " · escala " + devicePixelRatio]);
+  filas.push(["Conexión segura (HTTPS)", window.isSecureContext ? "sí" : "no"]);
+  filas.push(["WebCodecs (decodificador)", "VideoDecoder" in window ? "sí" : "no"]);
+  if ("VideoDecoder" in window) {
+    for (const [nombre, codec] of [["H.264 Baseline", CODEC], ["H.264 High", "avc1.64001F"], ["H.265", "hvc1.1.6.L93.B0"]]) {
+      try {
+        const r = await VideoDecoder.isConfigSupported({ codec, codedWidth: ANCHO, codedHeight: ALTO });
+        filas.push(["  · " + nombre, r.supported ? "sí" : "no"]);
+      } catch (e) { filas.push(["  · " + nombre, "error"]); }
+    }
+  }
+  filas.push(["WebCodecs (codificador)", "VideoEncoder" in window ? "sí" : "no"]);
+  const ms = window.MediaSource || window.ManagedMediaSource;
+  filas.push(["Media Source + H.264", ms && ms.isTypeSupported('video/mp4; codecs="' + CODEC + '"') ? "sí" : "no"]);
+  filas.push(["WebSocket", "WebSocket" in window ? "sí" : "no"]);
+  filas.push(["WebRTC", "RTCPeerConnection" in window ? "sí" : "no"]);
+  filas.push(["WebGL", (() => { try { return document.createElement("canvas").getContext("webgl") ? "sí" : "no"; } catch (e) { return "no"; } })()]);
+  filas.push(["Pantalla completa", document.documentElement.requestFullscreen ? "sí" : "no"]);
+  filas.push(["Mantener pantalla (Wake Lock)", "wakeLock" in navigator ? "sí" : "no"]);
+  filas.push(["Eventos táctiles", "ontouchstart" in window ? "sí" : "no"]);
+  filas.push(["Agente de usuario", ua]);
+  $("tabla").innerHTML = filas.map(([a, b]) => "<tr><td>" + a + "</td><td>" + b + "</td></tr>").join("");
+}
+
+// ---------- Vigilante de congelaciones ----------
+const vigilados = {};
+function vigilar(nombre, idEstado) {
+  vigilados[nombre] = { ultimo: performance.now(), congelado: false, idEstado, cortes: 0 };
+}
+function latido(nombre) {
+  const v = vigilados[nombre];
+  if (!v) return;
+  const ahora = performance.now();
+  if (v.congelado) {
+    anotar(nombre + ": vuelve a moverse tras " + ((ahora - v.desde) / 1000).toFixed(1) + " s parado");
+    v.congelado = false;
+    estado(v.idEstado, "en movimiento", "ok");
+  }
+  v.ultimo = ahora;
+}
+setInterval(() => {
+  const ahora = performance.now();
+  for (const [nombre, v] of Object.entries(vigilados)) {
+    if (!v.congelado && ahora - v.ultimo > CONGELADO_MS) {
+      v.congelado = true; v.desde = v.ultimo; v.cortes++;
+      anotar(nombre + ": CONGELADO");
+      estado(v.idEstado, "congelado", "bad");
+    }
+  }
+}, 250);
+
+// ---------- Prueba A: WebCodecs ----------
+function trocear(datos) {
+  // Separa el H.264 Annex B en fotogramas: parámetros (SPS/PPS/SEI) + un corte.
+  const nals = [];
+  let i = 0, inicio = -1;
+  while (i + 3 < datos.length) {
+    const tres = datos[i] === 0 && datos[i + 1] === 0 && datos[i + 2] === 1;
+    const cuatro = datos[i] === 0 && datos[i + 1] === 0 && datos[i + 2] === 0 && datos[i + 3] === 1;
+    if (tres || cuatro) {
+      if (inicio >= 0) nals.push([inicio, i]);
+      inicio = i;
+      i += cuatro ? 4 : 3;
+    } else i++;
+  }
+  if (inicio >= 0) nals.push([inicio, datos.length]);
+  // Un fotograma puede llevar varios cortes: empieza uno nuevo con SEI/SPS/PPS/AUD
+  // o con un corte cuyo first_mb_in_slice es 0 (primer bit del encabezado a 1).
+  const fotos = [];
+  let desde = null, clave = false, conCorte = false;
+  const cerrar = hasta => { if (conCorte) fotos.push({ datos: datos.subarray(desde, hasta), clave }); desde = null; clave = false; conCorte = false; };
+  for (const [a] of nals) {
+    const cabecera = datos[a + 2] === 1 ? a + 3 : a + 4;
+    const tipo = datos[cabecera] & 0x1f;
+    const esCorte = tipo === 1 || tipo === 5;
+    if (conCorte && ((tipo >= 6 && tipo <= 9) || (esCorte && (datos[cabecera + 1] & 0x80)))) cerrar(a);
+    if (desde === null) desde = a;
+    if (tipo === 5) clave = true;
+    if (esCorte) conCorte = true;
+  }
+  cerrar(datos.length);
+  return fotos;
+}
+
+async function pruebaA() {
+  if (!("VideoDecoder" in window)) { estado("estA", "sin WebCodecs", "bad"); anotar("A: el navegador no tiene WebCodecs"); return; }
+  const fotos = trocear(new Uint8Array(await (await fetch("prueba/prueba.h264")).arrayBuffer()));
+  const ctx = $("lienzo").getContext("2d");
+  const enviados = new Map();
+  let mostrados = 0, sumaRetraso = 0, ventana = performance.now(), fps = 0;
+  const dec = new VideoDecoder({
+    output(frame) {
+      ctx.drawImage(frame, 0, 0, ANCHO, ALTO);
+      const t0 = enviados.get(frame.timestamp);
+      if (t0 !== undefined) { sumaRetraso += performance.now() - t0; enviados.delete(frame.timestamp); }
+      frame.close();
+      mostrados++; latido("A");
+      const ahora = performance.now();
+      if (ahora - ventana >= 1000) {
+        fps = mostrados * 1000 / (ahora - ventana);
+        $("datosA").textContent = fps.toFixed(0) + " fps · decodificar " + (sumaRetraso / Math.max(mostrados, 1)).toFixed(1) + " ms";
+        mostrados = 0; sumaRetraso = 0; ventana = ahora;
+      }
+    },
+    error(e) { anotar("A: error " + e.message); estado("estA", "error", "bad"); }
+  });
+  dec.configure({ codec: CODEC, codedWidth: ANCHO, codedHeight: ALTO, optimizeForLatency: true });
+  vigilar("A", "estA");
+  estado("estA", "en movimiento", "ok");
+  anotar("A: empieza (" + fotos.length + " fotogramas)");
+  let n = 0, ts = 0;
+  setInterval(() => {
+    if (dec.state !== "configured" || dec.decodeQueueSize > 5) return;
+    const f = fotos[n];
+    enviados.set(ts, performance.now());
+    dec.decode(new EncodedVideoChunk({ type: f.clave ? "key" : "delta", timestamp: ts, data: f.datos }));
+    ts += Math.round(1e6 / FPS); // el navegador guarda la marca de tiempo como entero
+    n = (n + 1) % fotos.length;
+  }, 1000 / FPS);
+}
+
+// ---------- Prueba B: Media Source ----------
+async function pruebaB() {
+  const MS = window.MediaSource || window.ManagedMediaSource;
+  const tipo = 'video/mp4; codecs="' + CODEC + '"';
+  if (!MS || !MS.isTypeSupported(tipo)) { estado("estB", "no admitido", "bad"); anotar("B: Media Source no admite H.264"); return; }
+  const v = $("videoB"), fuente = new MS();
+  v.disableRemotePlayback = true;
+  v.src = URL.createObjectURL(fuente);
+  await new Promise(r => fuente.addEventListener("sourceopen", r, { once: true }));
+  const sb = fuente.addSourceBuffer(tipo);
+  sb.appendBuffer(await (await fetch("prueba/prueba.mp4")).arrayBuffer());
+  await new Promise(r => sb.addEventListener("updateend", r, { once: true }));
+  fuente.endOfStream();
+  v.loop = true;
+  seguirVideo(v, "B", "estB", "datosB");
+}
+
+// ---------- Prueba C: vídeo normal ----------
+function pruebaC() {
+  const v = $("videoC");
+  v.src = "prueba/prueba.mp4";
+  seguirVideo(v, "C", "estC", "datosC");
+}
+
+function seguirVideo(v, nombre, idEstado, idDatos) {
+  v.play().then(() => {
+    vigilar(nombre, idEstado);
+    estado(idEstado, "en movimiento", "ok");
+    anotar(nombre + ": empieza");
+  }).catch(e => { estado(idEstado, "no reproduce", "bad"); anotar(nombre + ": no se reproduce (" + e.message + ")"); });
+  let anterior = -1;
+  setInterval(() => {
+    if (v.currentTime !== anterior) { anterior = v.currentTime; latido(nombre); }
+    $(idDatos).textContent = v.paused ? "en pausa" : "t = " + v.currentTime.toFixed(1) + " s";
+  }, 100);
+  v.addEventListener("pause", () => anotar(nombre + ": el navegador lo ha pausado"));
+}
+
+// ---------- Toques ----------
+let toques = 0;
+$("tactil").addEventListener("pointerdown", e => { toques++; $("tactil").textContent = "toques: " + toques + " · tipo: " + e.pointerType; });
+$("tactil").addEventListener("pointermove", e => { if (e.buttons) $("tactil").textContent = "arrastrando en " + Math.round(e.offsetX) + ", " + Math.round(e.offsetY) + " · toques: " + toques; });
+
+// ---------- Botones y eventos de la página ----------
+let empezado = false;
+$("empezar").addEventListener("click", async () => {
+  if (empezado) return;
+  empezado = true;
+  $("empezar").textContent = "Pruebas en marcha";
+  if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
+  pruebaA().catch(e => anotar("A: " + e.message));
+  pruebaB().catch(e => { estado("estB", "error", "bad"); anotar("B: " + e.message); });
+  pruebaC();
+});
+$("completa").addEventListener("click", () => {
+  const c = $("cardA");
+  (c.requestFullscreen ? c.requestFullscreen() : Promise.reject(new Error("no disponible")))
+    .catch(e => anotar("Pantalla completa: " + e.message));
+});
+$("marca").addEventListener("click", () => anotar("—— AHORA EN D ——"));
+$("marca2").addEventListener("click", () => anotar("—— AHORA CIRCULANDO ——"));
+document.addEventListener("visibilitychange", () => anotar("La página está " + (document.hidden ? "oculta" : "visible")));
+addEventListener("error", e => anotar("Error: " + e.message));
+
+rellenarTabla();
+anotar("Página cargada");
+</script>
+</body>
+</html>

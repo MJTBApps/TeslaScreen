@@ -10,7 +10,7 @@ Elegido por el usuario el 08/11/2026:
 
 | Limitación de TslaMirror | Qué haremos | ¿Se puede? |
 |---|---|---|
-| Solo aparcado | Dibujar el vídeo en un canvas (WebCodecs) en vez de en una etiqueta de vídeo, que es la que Tesla pausa al salir de P | **Por probar en el coche** (prueba A frente a B y C) |
+| Solo aparcado | Dibujar el vídeo en un canvas (WebCodecs) en vez de en una etiqueta de vídeo, que es la que Tesla pausa al salir de P | **Sí: comprobado en el coche el 09/11/2026** (A sigue circulando; B y C se paran) |
 | Retraso y calidad | H.264 por hardware en el iPhone, decodificación por hardware en el coche, latencia medida y publicada | Sí |
 | Imagen vertical | Recortar y ampliar una zona (p. ej. el mapa) para llenar la pantalla horizontal; las apps que giran se ven a pantalla completa | Sí |
 | Precio o suscripción | Precio único, sin suscripción ni límite de minutos | Sí |
@@ -47,6 +47,18 @@ Problema abierto: el navegador del Tesla parece no abrir direcciones privadas (`
 6. Extra: escribe `http://172.20.10.1` con el Tesla en el punto de acceso del iPhone y apunta el error que sale.
 
 **Qué decide:** si A sigue en movimiento circulando, la app tiene sentido. Si B y C se paran pero A no, esa es nuestra ventaja sobre TslaMirror.
+
+### Resultados en el coche (09/11/2026, Model 3 2026)
+
+- Chrome **148**, Linux x86_64. Pantalla 1254×784, ventana del navegador 773×601 (escala 1,53).
+- WebCodecs (decodificador y codificador), H.264 Baseline y High, H.265, Media Source, WebSocket, WebRTC, WebGL, pantalla completa, Wake Lock y eventos táctiles: **todo sí**.
+- Aparcado: A a 30 fps con 2,8 ms de decodificación; B y C en movimiento.
+- **Al circular, A (canvas) sigue moviéndose y B y C (etiquetas de vídeo) se paran.** El registro no anotó ninguna congelación ni pausa de B y C: el coche deja de dibujar el vídeo sin pausarlo (su `currentTime` sigue avanzando), así que el vigilante no lo ve. Lo vio el usuario.
+- `http://172.20.10.1` con el punto de acceso del iPhone: **ERR_CONNECTION_REFUSED**. El navegador sí llega al iPhone (rechaza la conexión porque no hay nada escuchando); no bloquea la dirección privada.
+
+**Consecuencias para F1:**
+- Usar siempre canvas + WebCodecs (nunca `<video>`, tampoco para WebRTC).
+- WebCodecs solo funciona en una página segura (HTTPS). Una página servida por `http://172.20.10.1` no lo tendría, y una página HTTPS no puede abrir `ws://` hacia el iPhone (contenido mixto). Opciones a probar en F1: (a) página en GitHub Pages (HTTPS) y vídeo por **canal de datos de WebRTC** hasta el iPhone, que sí está permitido; (b) túnel VPN local con dominio y certificado, como TslaMirror. Primero (a), que no necesita servidor ni certificado.
 
 ## Siguientes fases
 

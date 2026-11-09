@@ -35,6 +35,26 @@ from pathlib import Path
 AQUI = Path(__file__).resolve().parent
 DOCS = AQUI.parent / "docs"
 CERTS = AQUI / ".cert"
+WEB = "https://mjtbapps.github.io/TeslaScreen/"
+PUNTO_ACCESO_IPHONE = "172.20.10.1"
+
+
+def preparar_docs():
+    """Sin el repositorio al lado (p. ej. en a-Shell del iPhone), baja lo necesario de la web."""
+    global DOCS
+    if (DOCS / "prueba" / "prueba.h264").is_file():
+        return
+    import urllib.request
+    DOCS = AQUI / "teslascreen_web"
+    for nombre in ("conexion.html", "prueba/prueba.h264"):
+        destino = DOCS / nombre
+        if not destino.is_file():
+            destino.parent.mkdir(parents=True, exist_ok=True)
+            print("Bajando", WEB + nombre, flush=True)
+            urllib.request.urlretrieve(WEB + nombre, destino)
+
+
+preparar_docs()
 PUERTO_HTTP, PUERTO_HTTPS, FPS = 8765, 8766, 30
 GUID_WS = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 TIPOS = {".html": "text/html; charset=utf-8", ".js": "text/javascript", ".json": "application/json",
@@ -46,8 +66,14 @@ def ip_local():
     try:
         s.connect(("8.8.8.8", 80))  # no envía nada: solo elige la interfaz de salida
         return s.getsockname()[0]
+    except OSError:
+        return PUNTO_ACCESO_IPHONE
     finally:
         s.close()
+
+
+def en_iphone():
+    return sys.platform == "ios" or "iPhone" in " ".join(map(str, __import__("os").uname()))
 
 
 def trocear(datos: bytes):
@@ -221,7 +247,8 @@ def servidor(puerto, contexto=None):
 
 
 def main():
-    ip = ip_local()
+    # En el iPhone, el coche lo ve por el punto de acceso: siempre 172.20.10.1.
+    ip = PUNTO_ACCESO_IPHONE if en_iphone() else ip_local()
     servidor(PUERTO_HTTP)
     try:
         crt, key = certificado(ip)

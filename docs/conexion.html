@@ -31,7 +31,7 @@ input{font:inherit;background:#0e1115;color:var(--fg);border:1px solid var(--lin
 </head>
 <body>
 <h1>TeslaScreen · Prueba de conexión</h1>
-<p>Comprueba por qué camino puede llegar el vídeo del móvil a esta página. En el iMac tiene que estar en marcha <code>herramientas/emisor_prueba.py</code>, y el coche, en la misma Wi-Fi. Si el coche pregunta si la página puede acceder a la red local, pulsa «Permitir».</p>
+<p>Comprueba por qué camino puede llegar el vídeo del móvil a esta página. El emisor (<code>emisor_prueba.py</code>) tiene que estar en marcha en el iPhone (con a-Shell, y el coche en su punto de acceso: IP 172.20.10.1) o en un ordenador de la misma Wi-Fi. Si el coche pregunta si la página puede acceder a la red local, pulsa «Permitir».</p>
 <div class="fila">
   <label for="ip">IP del emisor</label>
   <input id="ip" inputmode="decimal" placeholder="192.168.1.20" autocomplete="off">
@@ -248,7 +248,8 @@ $("probar").addEventListener("click", async () => {
 
 let guardada = "";
 try { guardada = localStorage.getItem("teslascreen_ip") || ""; } catch (e) {}
-$("ip").value = local ? location.hostname : guardada;
+// 172.20.10.1 es siempre el iPhone cuando el coche está en su punto de acceso.
+$("ip").value = local ? location.hostname : (guardada || "172.20.10.1");
 anotar("Página cargada");
 </script>
 </body>

@@ -73,7 +73,16 @@ Antes de compilar la app de iPhone (sin Xcode aquí, cada intento pasa por TestF
 
 Si todo falla, quedan WebRTC sin servidor de señalización o el túnel VPN de TslaMirror.
 
-Probarlo: en el iMac, `python3 herramientas/emisor_prueba.py` (si macOS pregunta, permitir conexiones entrantes). Con el coche en la misma Wi-Fi, abrir `https://mjtbapps.github.io/TeslaScreen/conexion.html`, escribir la IP que muestra el iMac y pulsar **Probar**. Comprobado en local el 09/11/2026: fetch y WebSocket a 30 fps, 1 Mbps, 4 ms de ida y vuelta.
+Probarlo en el iPhone (lo recomendado; es la conexión real de la app): instalar **a-Shell** (gratis, App Store), y en ella:
+
+```
+curl -L -O https://raw.githubusercontent.com/MJTBApps/TeslaScreen/main/herramientas/emisor_prueba.py
+python3 emisor_prueba.py
+```
+
+El emisor baja solo la página y el vídeo de la web. Con el coche en el punto de acceso del iPhone, la IP es siempre `172.20.10.1` (la página la trae escrita). a-Shell tiene que quedarse delante y con la pantalla encendida (iOS para las apps en segundo plano).
+
+Probarlo en el iMac, `python3 herramientas/emisor_prueba.py` (si macOS pregunta, permitir conexiones entrantes). Con el coche en la misma Wi-Fi, abrir `https://mjtbapps.github.io/TeslaScreen/conexion.html`, escribir la IP que muestra el iMac y pulsar **Probar**. Comprobado en local el 09/11/2026: fetch y WebSocket a 30 fps, 1 Mbps, 4 ms de ida y vuelta.
 
 ## Siguientes fases
 

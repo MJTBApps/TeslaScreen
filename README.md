@@ -60,6 +60,21 @@ Problema abierto: el navegador del Tesla parece no abrir direcciones privadas (`
 - Usar siempre canvas + WebCodecs (nunca `<video>`, tampoco para WebRTC).
 - WebCodecs solo funciona en una página segura (HTTPS). Una página servida por `http://172.20.10.1` no lo tendría, y una página HTTPS no puede abrir `ws://` hacia el iPhone (contenido mixto). Opciones a probar en F1: (a) página en GitHub Pages (HTTPS) y vídeo por **canal de datos de WebRTC** hasta el iPhone, que sí está permitido; (b) túnel VPN local con dominio y certificado, como TslaMirror. Primero (a), que no necesita servidor ni certificado.
 
+### F1, paso 1: prueba de conexión con el iMac (ahora)
+
+Antes de compilar la app de iPhone (sin Xcode aquí, cada intento pasa por TestFlight), el iMac hace de emisor: `herramientas/emisor_prueba.py` manda el vídeo de prueba como lo mandará la app, y `docs/conexion.html` prueba en el coche cada camino:
+
+| Camino | Qué decide |
+|---|---|
+| fetch `http://IP:8765/flujo` desde la página https de GitHub Pages | Si Chrome 148 del coche deja hablar con la red local (permiso «Local Network Access»). Si funciona, la app solo necesita un servidor HTTP: lo más sencillo |
+| WebSocket `ws://` | Se espera que falle (contenido mixto) |
+| WebSocket `wss://` con certificado propio | Plan B: aceptar una vez el aviso del certificado |
+| Página abierta directamente en `http://IP:8765/` | Confirma si sin HTTPS desaparece WebCodecs |
+
+Si todo falla, quedan WebRTC sin servidor de señalización o el túnel VPN de TslaMirror.
+
+Probarlo: en el iMac, `python3 herramientas/emisor_prueba.py` (si macOS pregunta, permitir conexiones entrantes). Con el coche en la misma Wi-Fi, abrir `https://mjtbapps.github.io/TeslaScreen/conexion.html`, escribir la IP que muestra el iMac y pulsar **Probar**. Comprobado en local el 09/11/2026: fetch y WebSocket a 30 fps, 1 Mbps, 4 ms de ida y vuelta.
+
 ## Siguientes fases
 
 - **F1** (2–3 días): app mínima de iPhone que sirve la página y un vídeo de prueba por el punto de acceso. Comprueba IP privada frente a túnel VPN y la latencia real.
@@ -71,4 +86,5 @@ En este iMac no hay Xcode (macOS 13), así que la app de iPhone se compilará en
 ## Herramientas
 
 - `herramientas/generar_video_prueba.py` crea los vídeos de `docs/prueba/` (necesita `pip install av numpy`).
-- Probar en local: `python3 -m http.server -d docs 8765` y abrir `http://localhost:8765/`.
+- `herramientas/emisor_prueba.py` es el emisor de prueba (solo biblioteca estándar y openssl; el certificado queda en `herramientas/.cert/`, que no se sube).
+- Probar en local: `python3 herramientas/emisor_prueba.py` y abrir `http://localhost:8765/`.

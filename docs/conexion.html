@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TeslaScreen · Conexión</title>
+<style>
+:root{--bg:#14181d;--panel:#1d232a;--line:#323a44;--fg:#eef1f4;--muted:#9aa6b2;--accent:#f07a2e;--ok:#5fd08a;--bad:#ff7a6e;--warn:#f2c35b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;padding:20px max(16px,env(safe-area-inset-left,0px))}
+h1{font-size:30px;margin:0 0 4px}
+h2{font-size:20px;margin:0 0 10px}
+p{margin:0 0 10px;color:var(--muted)}
+a{color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
+canvas{width:100%;aspect-ratio:16/9;background:#000;display:block;border-radius:4px}
+.estado{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.pill{display:inline-block;padding:1px 10px;border-radius:999px;font-weight:600;font-size:15px;white-space:nowrap}
+.ok{background:#1f3b2a;color:var(--ok)}.bad{background:#40211e;color:var(--bad)}.warn{background:#3d3218;color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:16px}
+td{padding:6px 0;border-bottom:1px solid var(--line);vertical-align:top}
+td:last-child{text-align:right;padding-left:10px}
+td small{display:block;color:var(--muted);font-size:14px}
+button{font:inherit;background:var(--accent);color:#111;border:0;border-radius:6px;padding:10px 18px;font-weight:600;cursor:pointer}
+button:disabled{opacity:.5}
+.fila{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:12px}
+input{font:inherit;background:#0e1115;color:var(--fg);border:1px solid var(--line);border-radius:6px;padding:9px 12px;width:13em;max-width:100%}
+#registro{font:15px/1.5 ui-monospace,Menlo,Consolas,monospace;max-height:320px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+</style>
+</head>
+<body>
+<h1>TeslaScreen · Prueba de conexión</h1>
+<p>Comprueba por qué camino puede llegar el vídeo del móvil a esta página. En el iMac tiene que estar en marcha <code>herramientas/emisor_prueba.py</code>, y el coche, en la misma Wi-Fi. Si el coche pregunta si la página puede acceder a la red local, pulsa «Permitir».</p>
+<div class="fila">
+  <label for="ip">IP del emisor</label>
+  <input id="ip" inputmode="decimal" placeholder="192.168.1.20" autocomplete="off">
+  <button id="probar">Probar</button>
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h2>Resultados</h2>
+    <table id="resultados"></table>
+  </div>
+  <div class="card">
+    <h2>Vídeo recibido</h2>
+    <canvas id="lienzo" width="1280" height="720"></canvas>
+    <div class="estado"><span id="estVideo" class="pill warn">sin empezar</span><span id="datosVideo"></span></div>
+  </div>
+  <div class="card">
+    <h2>Esta página</h2>
+    <table id="pagina"></table>
+  </div>
+  <div class="card">
+    <h2>Registro</h2>
+    <div id="registro"></div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const CODEC = "avc1.42C01F", ANCHO = 1280, ALTO = 720, FPS = 30, SEGUNDOS = 6;
+const PUERTO_HTTP = 8765, PUERTO_HTTPS = 8766;
+// Pide al navegador permiso para la red local (Chrome 142+); los que no lo conocen lo ignoran.
+const RED_LOCAL = { targetAddressSpace: "local" };
+
+function hora() { return new Date().toLocaleTimeString("es-ES", { hour12: false }); }
+function anotar(texto) { const r = $("registro"); r.textContent = hora() + "  " + texto + "\n" + r.textContent; }
+function pill(texto, clase) { return '<span class="pill ' + clase + '">' + texto + "</span>"; }
+function esc(t) { return String(t).replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[c]); }
+
+// ---------- Esta página ----------
+const local = location.port === String(PUERTO_HTTP) || location.port === String(PUERTO_HTTPS);
+(function datosPagina() {
+  const chrome = (navigator.userAgent.match(/Chrom(?:e|ium)\/([\d.]+)/) || [])[1] || "no aparece";
+  const filas = [
+    ["Dirección", location.origin],
+    ["Página segura", window.isSecureContext ? "sí" : "no"],
+    ["WebCodecs (decodificador)", "VideoDecoder" in window ? "sí" : "no"],
+    ["Versión de Chrome", chrome],
+  ];
+  $("pagina").innerHTML = filas.map(([a, b]) => "<tr><td>" + a + "</td><td>" + esc(b) + "</td></tr>").join("");
+})();
+
+// ---------- Resultados ----------
+const PRUEBAS = [
+  ["ping", "Red local: responde el emisor", "fetch a http://IP:" + PUERTO_HTTP + "/ping"],
+  ["fetch", "Vídeo por fetch (http)", "el camino más sencillo para la app"],
+  ["ws", "Vídeo por WebSocket (ws://)", "se espera que falle desde una página https"],
+  ["wss", "Vídeo por WebSocket seguro (wss://)", "necesita aceptar antes el certificado propio"],
+  ["retraso", "Ida y vuelta (ping)", "mediana de 10 pings"],
+];
+const res = {};
+function pintarResultados() {
+  $("resultados").innerHTML = PRUEBAS.map(([id, nombre, nota]) => {
+    const r = res[id] || { texto: "sin probar", clase: "warn" };
+    return "<tr><td>" + nombre + "<small>" + esc(r.detalle || nota) + "</small></td><td>" + pill(r.texto, r.clase) + "</td></tr>";
+  }).join("");
+}
+function resultado(id, texto, clase, detalle) { res[id] = { texto, clase, detalle }; pintarResultados(); }
+pintarResultados();
+
+// ---------- Recepción y decodificación ----------
+function nuevoReceptor() {
+  const ctx = $("lienzo").getContext("2d");
+  let resto = new Uint8Array(0), recibidos = 0, mostrados = 0, bytes = 0, ts = 0, clave = false, error = null;
+  const inicio = performance.now();
+  let dec = null;
+  if ("VideoDecoder" in window) {
+    dec = new VideoDecoder({
+      output(f) { ctx.drawImage(f, 0, 0, ANCHO, ALTO); f.close(); mostrados++; },
+      error(e) { error = e.message; },
+    });
+    dec.configure({ codec: CODEC, codedWidth: ANCHO, codedHeight: ALTO, optimizeForLatency: true });
+  }
+  function paquete(esClave, datos) {
+    recibidos++;
+    if (!dec || dec.state !== "configured") return;
+    if (!clave && !esClave) return; // hay que empezar por un fotograma clave
+    clave = true;
+    dec.decode(new EncodedVideoChunk({ type: esClave ? "key" : "delta", timestamp: ts, data: datos }));
+    ts += Math.round(1e6 / FPS);
+  }
+  return {
+    meter(trozo) {
+      bytes += trozo.length;
+      const b = new Uint8Array(resto.length + trozo.length);
+      b.set(resto); b.set(trozo, resto.length);
+      let i = 0;
+      while (b.length - i >= 5) {
+        const largo = ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
+        if (b.length - i - 4 < largo) break;
+        paquete(b[i + 4] === 1, b.subarray(i + 5, i + 4 + largo));
+        i += 4 + largo;
+      }
+      resto = b.slice(i);
+      const s = (performance.now() - inicio) / 1000;
+      $("datosVideo").textContent = (recibidos / s).toFixed(0) + " fps recibidos · " + (dec ? (mostrados / s).toFixed(0) + " dibujados · " : "") + (bytes * 8 / 1e6 / s).toFixed(1) + " Mbps";
+    },
+    async fin() {
+      if (dec && dec.state === "configured") { try { await dec.flush(); } catch (e) {} dec.close(); }
+      const s = (performance.now() - inicio) / 1000;
+      return { recibidos, mostrados, fps: recibidos / s, fpsDibujo: mostrados / s, mbps: bytes * 8 / 1e6 / s, error, decodifica: !!dec };
+    },
+  };
+}
+
+function valorar(id, r, camino) {
+  const detalle = r.fps.toFixed(0) + " fps recibidos" + (r.decodifica ? ", " + r.fpsDibujo.toFixed(0) + " dibujados" : ", sin WebCodecs no se dibuja") + ", " + r.mbps.toFixed(1) + " Mbps" + (r.error ? " · error: " + r.error : "");
+  anotar(camino + ": " + detalle);
+  const bien = r.decodifica ? r.fpsDibujo >= 20 : r.fps >= 20;
+  resultado(id, bien ? (r.decodifica ? "funciona" : "llega, sin dibujar") : (r.recibidos ? "a tirones" : "no llega"), bien && r.decodifica ? "ok" : (r.recibidos ? "warn" : "bad"), detalle);
+  $("estVideo").textContent = bien ? camino + ": en movimiento" : camino + ": mal";
+  $("estVideo").className = "pill " + (bien ? "ok" : "bad");
+}
+
+// ---------- Pruebas ----------
+async function pruebaPing(ip) {
+  const url = "http://" + ip + ":" + PUERTO_HTTP + "/ping";
+  try {
+    const r = await fetch(url, { cache: "no-store", ...RED_LOCAL });
+    const j = await r.json();
+    resultado("ping", "sí", "ok", "responde " + j.emisor);
+    anotar("Ping: responde el emisor");
+    return true;
+  } catch (e) {
+    resultado("ping", "no", "bad", e.name + ": " + e.message);
+    anotar("Ping: " + e.name + ": " + e.message + (location.protocol === "https:" ? " (¿bloquea el navegador una dirección http desde una página https?)" : ""));
+    return false;
+  }
+}
+
+async function pruebaFetch(ip) {
+  const url = "http://" + ip + ":" + PUERTO_HTTP + "/flujo";
+  const ctl = new AbortController();
+  const rec = nuevoReceptor();
+  const reloj = setTimeout(() => ctl.abort(), SEGUNDOS * 1000);
+  try {
+    const r = await fetch(url, { cache: "no-store", signal: ctl.signal, ...RED_LOCAL });
+    const lector = r.body.getReader();
+    for (;;) { const { done, value } = await lector.read(); if (done) break; rec.meter(value); }
+  } catch (e) {
+    if (e.name !== "AbortError") { clearTimeout(reloj); await rec.fin(); resultado("fetch", "no", "bad", e.name + ": " + e.message); anotar("Fetch: " + e.message); return; }
+  }
+  clearTimeout(reloj);
+  valorar("fetch", await rec.fin(), "Fetch");
+}
+
+function pruebaWs(id, url, nombre) {
+  return new Promise(listo => {
+    const rec = nuevoReceptor();
+    let ws, abierto = false, acabado = false;
+    const acabar = async (fallo) => {
+      if (acabado) return; acabado = true;
+      try { ws && ws.close(); } catch (e) {}
+      const r = await rec.fin();
+      if (fallo && !r.recibidos) { resultado(id, "no", "bad", fallo); anotar(nombre + ": " + fallo); }
+      else valorar(id, r, nombre);
+      listo();
+    };
+    try { ws = new WebSocket(url); } catch (e) { acabar(e.name + ": " + e.message); return; }
+    ws.binaryType = "arraybuffer";
+    ws.onopen = () => { abierto = true; anotar(nombre + ": conectado"); setTimeout(() => acabar(), SEGUNDOS * 1000); };
+    ws.onmessage = e => rec.meter(new Uint8Array(e.data));
+    ws.onerror = () => { if (!abierto) acabar("no conecta"); };
+    ws.onclose = e => { if (!abierto) acabar("cerrado sin conectar (código " + e.code + ")"); };
+    setTimeout(() => { if (!abierto) acabar("sin respuesta en 5 s"); }, 5000);
+  });
+}
+
+async function pruebaRetraso(ip) {
+  const url = "http://" + ip + ":" + PUERTO_HTTP + "/ping";
+  const tiempos = [];
+  for (let i = 0; i < 10; i++) {
+    const t0 = performance.now();
+    try { await (await fetch(url + "?n=" + i, { cache: "no-store", ...RED_LOCAL })).json(); } catch (e) { break; }
+    tiempos.push(performance.now() - t0);
+  }
+  if (!tiempos.length) { resultado("retraso", "no", "bad", "no hay ping"); return; }
+  tiempos.sort((a, b) => a - b);
+  const m = tiempos[Math.floor(tiempos.length / 2)];
+  resultado("retraso", m.toFixed(0) + " ms", m < 40 ? "ok" : "warn", "mediana de " + tiempos.length + " pings (mín. " + tiempos[0].toFixed(0) + " ms)");
+  anotar("Ida y vuelta: " + m.toFixed(0) + " ms");
+}
+
+$("probar").addEventListener("click", async () => {
+  const ip = $("ip").value.trim();
+  if (!/^[\w.:-]+$/.test(ip)) { anotar("Escribe la IP del emisor (la muestra el iMac al arrancarlo)"); return; }
+  try { localStorage.setItem("teslascreen_ip", ip); } catch (e) {}
+  $("probar").disabled = true;
+  for (const k of Object.keys(res)) delete res[k];
+  pintarResultados();
+  anotar("—— Empiezan las pruebas con " + ip + " ——");
+  const responde = await pruebaPing(ip);
+  if (responde) await pruebaFetch(ip); else resultado("fetch", "no", "bad", "el emisor no responde por http");
+  await pruebaWs("ws", "ws://" + ip + ":" + PUERTO_HTTP + "/ws", "WebSocket");
+  await pruebaWs("wss", "wss://" + ip + ":" + PUERTO_HTTPS + "/ws", "WebSocket seguro");
+  if (!res.wss || res.wss.clase === "bad") {
+    res.wss.detalle += " · abre https://" + ip + ":" + PUERTO_HTTPS + "/ , acepta el aviso del certificado y vuelve a probar";
+    pintarResultados();
+  }
+  if (responde) await pruebaRetraso(ip); else resultado("retraso", "no", "bad", "no hay ping");
+  anotar("—— Fin ——");
+  $("probar").disabled = false;
+});
+
+let guardada = "";
+try { guardada = localStorage.getItem("teslascreen_ip") || ""; } catch (e) {}
+$("ip").value = local ? location.hostname : guardada;
+anotar("Página cargada");
+</script>
+</body>
+</html>

@@ -14,7 +14,7 @@ p{margin:0 0 10px;color:var(--muted)}
 a{color:var(--accent)}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;margin-top:16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:16px;min-width:0}
-canvas{width:100%;aspect-ratio:16/9;background:#000;display:block;border-radius:4px}
+canvas{width:100%;aspect-ratio:16/9;object-fit:contain;background:#000;display:block;border-radius:4px}
 .estado{display:flex;justify-content:space-between;gap:10px;margin-top:8px;font-variant-numeric:tabular-nums;flex-wrap:wrap}
 .pill{display:inline-block;padding:1px 10px;border-radius:999px;font-weight:600;font-size:15px;white-space:nowrap}
 .ok{background:#1f3b2a;color:var(--ok)}.bad{background:#40211e;color:var(--bad)}.warn{background:#3d3218;color:var(--warn)}
@@ -103,23 +103,40 @@ function resultado(id, texto, clase, detalle) { res[id] = { texto, clase, detall
 pintarResultados();
 
 // ---------- Recepción y decodificación ----------
+function codecDe(d) {
+  for (let i = 0; i + 4 < d.length; i++) {
+    if (d[i] === 0 && d[i + 1] === 0 && d[i + 2] === 1 && (d[i + 3] & 0x1f) === 7) {
+      const h = x => x.toString(16).padStart(2, "0");
+      return "avc1." + h(d[i + 4]) + h(d[i + 5]) + h(d[i + 6]);
+    }
+  }
+  return null;
+}
 function nuevoReceptor() {
-  const ctx = $("lienzo").getContext("2d");
+  const lienzo = $("lienzo"), ctx = lienzo.getContext("2d");
   let resto = new Uint8Array(0), recibidos = 0, mostrados = 0, bytes = 0, ts = 0, clave = false, error = null;
   const inicio = performance.now();
   let dec = null;
   if ("VideoDecoder" in window) {
     dec = new VideoDecoder({
-      output(f) { ctx.drawImage(f, 0, 0, ANCHO, ALTO); f.close(); mostrados++; },
+      output(f) {
+        if (lienzo.width !== f.displayWidth || lienzo.height !== f.displayHeight) { lienzo.width = f.displayWidth; lienzo.height = f.displayHeight; }
+        ctx.drawImage(f, 0, 0); f.close(); mostrados++;
+      },
       error(e) { error = e.message; },
     });
-    dec.configure({ codec: CODEC, codedWidth: ANCHO, codedHeight: ALTO, optimizeForLatency: true });
+
   }
   function paquete(esClave, datos) {
     recibidos++;
-    if (!dec || dec.state !== "configured") return;
+    if (!dec) return;
     if (!clave && !esClave) return; // hay que empezar por un fotograma clave
-    clave = true;
+    if (!clave) {
+      // El códec sale del SPS del primer fotograma clave (el del móvil puede no ser Baseline).
+      dec.configure({ codec: codecDe(datos) || CODEC, optimizeForLatency: true });
+      clave = true;
+    }
+    if (dec.state !== "configured") return;
     dec.decode(new EncodedVideoChunk({ type: esClave ? "key" : "delta", timestamp: ts, data: datos }));
     ts += Math.round(1e6 / FPS);
   }
@@ -129,10 +146,10 @@ function nuevoReceptor() {
       const b = new Uint8Array(resto.length + trozo.length);
       b.set(resto); b.set(trozo, resto.length);
       let i = 0;
-      while (b.length - i >= 5) {
+      while (b.length - i >= 13) {
         const largo = ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
         if (b.length - i - 4 < largo) break;
-        paquete(b[i + 4] === 1, b.subarray(i + 5, i + 4 + largo));
+        paquete(b[i + 4] === 1, b.subarray(i + 13, i + 4 + largo));
         i += 4 + largo;
       }
       resto = b.slice(i);

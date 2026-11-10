@@ -4,3 +4,8 @@ __pycache__/
 *.xcodeproj/
 build/
 herramientas/.cert/
+android/.gradle-dist/
+android/.gradle/
+android/local.properties
+android/app/build/
+android/build/

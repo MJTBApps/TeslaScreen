@@ -84,6 +84,21 @@ El emisor baja solo la página y el vídeo de la web. Con el coche en el punto d
 
 Probarlo en el iMac, `python3 herramientas/emisor_prueba.py` (si macOS pregunta, permitir conexiones entrantes). Con el coche en la misma Wi-Fi, abrir `https://mjtbapps.github.io/TeslaScreen/conexion.html`, escribir la IP que muestra el iMac y pulsar **Probar**. Comprobado en local el 09/11/2026: fetch y WebSocket a 30 fps, 1 Mbps, 4 ms de ida y vuelta.
 
+## App de Android (`android/`, desde el 10/11/2026)
+
+Nombre provisional **EspejoCoche** (`es.mjtbapps.espejocoche`, sin «Tesla» por las normas de Google Play). Primera versión de prueba, 0.1.0:
+
+- `CaptureService.kt`: MediaProjection → H.264 por hardware (MediaCodec, lado mayor 1280, 4 Mbps, fotograma clave cada 2 s, repite el último a los 100 ms si la pantalla no cambia). Al girar el móvil se reconfigura (Android 14+ solo admite una pantalla virtual por permiso).
+- `VideoServer.kt`: servidor en el puerto 8765 con el mismo protocolo que `herramientas/emisor_prueba.py` (`/ping`, `/flujo`, `/ws`; paquete = longitud + clave + marca de tiempo en µs + H.264).
+- `MainActivity.kt`: muestra las direcciones para el coche (la del punto de acceso primero) y el estado.
+- Página del coche: `docs/ver.html?ip=…` (pantalla completa, reconexión automática, fetch y si no WebSocket, fps, Mbps y retraso real captura → pantalla).
+
+Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.1.0-prueba.apk` (firma de depuración del iMac).
+
+Comprobado en el emulador (Android 14) el 10/11/2026: permiso, emisión, giro a horizontal y página en vivo (10–20 fps y 100–150 ms en el emulador, que codifica por software). Falta probarlo en un móvil real y en el coche.
+
+Pendiente para Google Play: control táctil (servicio de accesibilidad), aviso al detectar el Bluetooth del coche, favorito con código y servidor de emparejamiento, nombre e icono definitivos.
+
 ## Siguientes fases
 
 - **F1** (2–3 días): app mínima de iPhone que sirve la página y un vídeo de prueba por el punto de acceso. Comprueba IP privada frente a túnel VPN y la latencia real.

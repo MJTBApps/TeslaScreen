@@ -9,8 +9,9 @@ para ver cuál deja pasar el navegador del coche:
 
 También sirve docs/conexion.html en http://IP:8765/ y https://IP:8766/.
 
-Cada paquete de vídeo es: 4 bytes de longitud (big endian) + 1 byte (1 = fotograma
-clave) + el fotograma H.264 Annex B. Es el formato que usará la app.
+Cada paquete de vídeo es: 4 bytes de longitud (big endian, cuenta lo que sigue) +
+1 byte (1 = fotograma clave) + 8 bytes de marca de tiempo en µs + el fotograma
+H.264 Annex B. Es el mismo formato que la app de Android (VideoServer.kt).
 
 Uso, con el coche en la misma Wi-Fi que el iMac:
     python3 herramientas/emisor_prueba.py
@@ -106,15 +107,23 @@ def trocear(datos: bytes):
     return fotos
 
 
-FOTOS = [struct.pack(">IB", len(d) + 1, 1 if c else 0) + d
-         for c, d in trocear((DOCS / "prueba" / "prueba.h264").read_bytes())]
+FOTOS = trocear((DOCS / "prueba" / "prueba.h264").read_bytes())
+
+
+def reloj_us():
+    return time.monotonic_ns() // 1000
+
+
+def empaquetar(clave, datos):
+    # longitud (cuenta lo que sigue) + clave + marca de tiempo en µs + H.264
+    return struct.pack(">IBQ", len(datos) + 9, 1 if clave else 0, reloj_us()) + datos
 
 
 def emitir(escribir):
     """Manda los fotogramas en bucle a 30 fps hasta que el navegador se va."""
     t0, n = time.monotonic(), 0
     while True:
-        escribir(FOTOS[n % len(FOTOS)])
+        escribir(empaquetar(*FOTOS[n % len(FOTOS)]))
         n += 1
         espera = t0 + n / FPS - time.monotonic()
         if espera > 0:
@@ -154,7 +163,7 @@ class Manejador(http.server.BaseHTTPRequestHandler):
         ruta = self.path.split("?")[0]
         try:
             if ruta == "/ping":
-                cuerpo = json.dumps({"emisor": "TeslaScreen", "t": time.time() * 1000}).encode()
+                cuerpo = json.dumps({"emisor": "TeslaScreen", "relojUs": reloj_us()}).encode()
                 self.send_response(200)
                 self.cors()
                 self.send_header("Content-Type", "application/json")

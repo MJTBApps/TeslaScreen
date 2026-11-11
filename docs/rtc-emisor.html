@@ -20,6 +20,11 @@ video{width:100%;margin-top:14px;border-radius:8px;background:#000}
 <h1>EspejoCoche · prueba WebRTC</h1>
 <p>Envía la cámara del móvil al coche por Internet para probar la conexión. Escribe el código que sale en la pantalla del coche.</p>
 <input id="codigo" inputmode="numeric" maxlength="6" placeholder="000000">
+<details id="turn" style="margin-top:14px"><summary>Servidor de reenvío (TURN)</summary>
+<p>Copia aquí el usuario y la contraseña de tu panel de ExpressTURN. Se guardan solo en este navegador.</p>
+<input id="tu" placeholder="Usuario" autocomplete="off" style="font-size:18px;letter-spacing:0">
+<input id="tp" placeholder="Contraseña" autocomplete="off" style="font-size:18px;letter-spacing:0;margin-top:8px">
+</details>
 <button id="enviar">Enviar la cámara</button>
 <div id="estado"></div>
 <video id="video" playsinline muted autoplay></video>
@@ -31,6 +36,13 @@ const ICE = [
   { urls: "stun:stun.l.google.com:19302" },
 ];
 let peer = null;
+try { $("tu").value = localStorage.getItem("ec_tu") || ""; $("tp").value = localStorage.getItem("ec_tp") || ""; } catch (e) {}
+if (!$("tu").value) $("turn").open = true;
+function hielo() {
+  const u = $("tu").value.trim(), p = $("tp").value.trim();
+  try { localStorage.setItem("ec_tu", u); localStorage.setItem("ec_tp", p); } catch (e) {}
+  return u && p ? ICE.concat([{ urls: ["turn:free.expressturn.com:3478", "turn:free.expressturn.com:3478?transport=tcp"], username: u, credential: p }]) : ICE;
+}
 const estado = t => { $("estado").textContent = t; };
 
 $("enviar").onclick = async () => {
@@ -43,13 +55,14 @@ $("enviar").onclick = async () => {
   $("video").srcObject = stream;
   if (peer) peer.destroy();
   estado("conectando con el servidor…");
-  peer = new Peer({ config: { iceServers: ICE } });
+  peer = new Peer({ config: { iceServers: hielo() } });
   peer.on("error", e => estado("error: " + e.type + " " + e.message));
   peer.on("open", () => {
     estado("llamando al coche…");
     const c = peer.call("espejocoche-" + codigo, stream);
     c.peerConnection.addEventListener("iceconnectionstatechange", () => estado("conexión: " + c.peerConnection.iceConnectionState));
     c.on("close", () => estado("el coche ha colgado"));
+    c.peerConnection.addEventListener("icecandidateerror", e => { if (e.url && e.url.startsWith("turn")) estado("reenvío: error " + e.errorCode + " " + e.errorText); });
   });
 };
 </script>

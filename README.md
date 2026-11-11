@@ -93,7 +93,7 @@ Nombre provisional **EspejoCoche** (`es.mjtbapps.espejocoche`, sin «Tesla» por
 - `MainActivity.kt`: muestra las direcciones para el coche (la del punto de acceso primero) y el estado.
 - Página del coche: `docs/ver.html?ip=…` (pantalla completa, reconexión automática, fetch y si no WebSocket, fps, Mbps y retraso real captura → pantalla).
 
-Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.1.2-prueba.apk` (firma de depuración del iMac).
+Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.1.3-prueba.apk` (firma de depuración del iMac).
 
 Comprobado en el emulador (Android 14) el 10/11/2026: permiso, emisión, giro a horizontal y página en vivo (10–20 fps y 100–150 ms en el emulador, que codifica por software). Falta probarlo en un móvil real y en el coche.
 

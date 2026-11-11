@@ -105,6 +105,8 @@ class VideoServer(
                 val i = it.indexOf(':')
                 if (i > 0) it.substring(0, i).trim().lowercase() to it.substring(i + 1).trim() else null
             }.toMap()
+            if (ruta != "/ping" || socket.inetAddress.hostAddress != ultimoCliente)
+                Diario.anotar("Llega $metodo $ruta de ${socket.inetAddress.hostAddress} (origen ${h["origin"] ?: "-"})")
             ultimaDireccionLocal = socket.localAddress.hostAddress
             ultimoCliente = socket.inetAddress.hostAddress
             val salida = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)

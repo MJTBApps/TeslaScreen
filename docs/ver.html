@@ -181,18 +181,20 @@ async function conectar() {
     try {
       pintarEstado("warn", "buscando el móvil…");
       // Si fetch está bloqueado (página https → http local), se prueba el WebSocket sin medir el retraso.
-      let rtt = null;
-      try { rtt = await sincronizarReloj(base); } catch (e) { console.warn("ping:", e); desfaseMs = NaN; }
+      let rtt = null, fallo = "";
+      try { rtt = await sincronizarReloj(base); } catch (e) { console.warn("ping:", e); desfaseMs = NaN; fallo = "ping: " + (e.name || "") + " " + e.message; }
       if (mia !== sesion) return;
       recibiendo = true; mostrarBarra();
       if (rtt !== null) {
         try { camino = "fetch"; await porFetch(base, mia); }
         catch (e) { if (mia !== sesion) return; console.warn("fetch:", e); }
       }
-      camino = "WebSocket"; await porWebSocket(base, mia);
+      camino = "WebSocket";
+      try { await porWebSocket(base, mia); }
+      catch (e) { throw new Error((fallo ? fallo + " · " : "") + "ws: " + (e.name || "") + " " + e.message); }
     } catch (e) {
       recibiendo = false; mostrarBarra();
-      pintarEstado("bad", "sin conexión", " " + e.message + " · reintento en 2 s");
+      pintarEstado("bad", "sin conexión", " a " + ip + " · " + e.message + " · " + (window.isSecureContext ? "seguro" : "no seguro") + " · reintento en 2 s");
       await new Promise(r => setTimeout(r, 2000));
     }
   }

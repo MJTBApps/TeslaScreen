@@ -52,21 +52,34 @@ class VideoServer(
 
     val numClientes get() = clientes.size
 
+    private val servidores = CopyOnWriteArrayList<ServerSocket>()
+
+    /** Puertos de prueba extra: por si el coche solo deja salir a algunos. */
+    val extras = listOf(80, 443, 8080, 8443, 8000, 8888, 3000, 5000)
+
     fun arrancar() {
-        val s = ServerSocket()
-        s.reuseAddress = true
-        s.bind(InetSocketAddress(puerto))
-        servidor = s
-        Thread({
-            while (!s.isClosed) {
-                val socket = try { s.accept() } catch (e: Exception) { break }
-                Thread({ atender(socket) }, "cliente").start()
+        for (p in listOf(puerto) + extras) {
+            val s = try {
+                ServerSocket().apply { reuseAddress = true; bind(InetSocketAddress(p)) }
+            } catch (e: Exception) {
+                if (p == puerto) throw e
+                Diario.anotar("Puerto $p no disponible: ${e.message}"); continue
             }
-        }, "servidor").start()
+            if (p == puerto) servidor = s
+            servidores.add(s)
+            Thread({
+                while (!s.isClosed) {
+                    val socket = try { s.accept() } catch (e: Exception) { break }
+                    Thread({ atender(socket) }, "cliente").start()
+                }
+            }, "servidor$p").start()
+        }
+        Diario.anotar("Escuchando en: " + servidores.joinToString(" ") { it.localPort.toString() })
     }
 
     fun parar() {
-        try { servidor?.close() } catch (_: Exception) {}
+        servidores.forEach { try { it.close() } catch (_: Exception) {} }
+        servidores.clear()
         clientes.forEach { try { it.socket.close() } catch (_: Exception) {} }
         clientes.clear()
     }
@@ -106,7 +119,7 @@ class VideoServer(
                 if (i > 0) it.substring(0, i).trim().lowercase() to it.substring(i + 1).trim() else null
             }.toMap()
             if (ruta != "/ping" || socket.inetAddress.hostAddress != ultimoCliente)
-                Diario.anotar("Llega $metodo $ruta de ${socket.inetAddress.hostAddress} (origen ${h["origin"] ?: "-"})")
+                Diario.anotar("Llega (puerto ${socket.localPort}) $metodo $ruta de ${socket.inetAddress.hostAddress} (origen ${h["origin"] ?: "-"})")
             ultimaDireccionLocal = socket.localAddress.hostAddress
             ultimoCliente = socket.inetAddress.hostAddress
             val salida = BufferedOutputStream(socket.getOutputStream(), 64 * 1024)

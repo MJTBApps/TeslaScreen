@@ -109,14 +109,14 @@ class MainActivity : Activity() {
     }
 
     private fun textoDirecciones(): String {
-        val ips = try {
+        val vistas = try {
             NetworkInterface.getNetworkInterfaces().toList()
                 .filter { it.isUp && !it.isLoopback }
                 .flatMap { ni -> ni.inetAddresses.toList().filterIsInstance<Inet4Address>().map { ni.name to it.hostAddress!! } }
         } catch (_: Exception) { emptyList() }
         // ccmni/rmnet/… son los datos móviles (IP del operador): el coche no llega por ahí.
         val datos = Regex("^(ccmni|rmnet|v4-|clat|dummy|tun|p2p)")
-        val todas = ips
+        val todas = vistas
         val ips = todas.filterNot { datos.containsMatchIn(it.first) }
         if (ips.isEmpty()) return "No veo el punto de acceso: actívalo en Ajustes y conecta el coche a él.\n(Redes vistas: " +
             todas.joinToString(", ") { "${it.first} ${it.second}" } + ")"

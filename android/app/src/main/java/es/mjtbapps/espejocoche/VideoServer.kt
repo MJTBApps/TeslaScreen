@@ -103,8 +103,14 @@ class VideoServer(
                     val json = """{"emisor":"EspejoCoche","relojUs":${System.nanoTime() / 1000},"ancho":$w,"alto":$hh}"""
                     responder(salida, "200 OK", "application/json", json.toByteArray())
                 }
-                ruta == "/flujo" -> flujo(socket, salida)
-                ruta == "/ws" -> websocket(socket, salida, h["sec-websocket-key"])
+                ruta == "/flujo" -> {
+                    Diario.anotar("El coche (${socket.inetAddress.hostAddress}) pide el vídeo por fetch")
+                    flujo(socket, salida)
+                }
+                ruta == "/ws" -> {
+                    Diario.anotar("El coche (${socket.inetAddress.hostAddress}) pide el vídeo por WebSocket")
+                    websocket(socket, salida, h["sec-websocket-key"])
+                }
                 else -> {
                     val texto = "EspejoCoche: abre https://mjtbapps.github.io/TeslaScreen/ver.html?ip=${socket.localAddress.hostAddress} en el navegador del coche."
                     responder(salida, "200 OK", "text/plain; charset=utf-8", texto.toByteArray())

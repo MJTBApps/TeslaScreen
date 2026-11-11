@@ -65,6 +65,7 @@ class CaptureService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACCION_PARAR) {
+            Diario.anotar("Parado por el usuario")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -79,6 +80,7 @@ class CaptureService : Service() {
         @Suppress("DEPRECATION")
         val datos = intent?.getParcelableExtra<Intent>(EXTRA_DATOS)
         if (codigo != Activity.RESULT_OK || datos == null) {
+            Diario.anotar("El servicio no ha recibido el permiso (código $codigo)")
             stopSelf()
             return START_NOT_STICKY
         }
@@ -97,34 +99,48 @@ class CaptureService : Service() {
             val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             val p = mpm.getMediaProjection(codigo, datos) ?: throw IllegalStateException("sin proyección")
             proyeccion = p
+            Diario.anotar("Permiso de grabación concedido")
             p.registerCallback(object : MediaProjection.Callback() {
-                override fun onStop() { stopSelf() }
+                override fun onStop() {
+                    Diario.anotar("Android ha parado la grabación (onStop)")
+                    stopSelf()
+                }
                 override fun onCapturedContentResize(width: Int, height: Int) {
-                    manejador.post { reconfigurar(width, height) }
+                    Diario.anotar("Tamaño capturado: $width×$height")
+                }
+                override fun onCapturedContentVisibilityChanged(isVisible: Boolean) {
+                    Diario.anotar("Contenido capturado visible: $isVisible")
                 }
             }, manejador)
             servidor = VideoServer(PUERTO, ::pedirClave) { ancho to alto }.also { it.arrancar() }
+            Diario.anotar("Servidor en el puerto $PUERTO")
             val (w, h) = tamanoPantalla()
-            val (aw, ah) = escalar(w, h)
-            val superficie = crearCodificador(aw, ah)
+            Diario.anotar("Pantalla del móvil: $w×$h, ${resources.displayMetrics.densityDpi} ppp")
+            val superficie = crearCodificador(w, h)
             pantalla = p.createVirtualDisplay(
-                "EspejoCoche", aw, ah, resources.displayMetrics.densityDpi,
+                "EspejoCoche", ancho, alto, resources.displayMetrics.densityDpi,
                 DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, superficie, null, manejador,
             )
+            Diario.anotar("Pantalla virtual creada: $ancho×$alto")
             (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager)
                 .registerDisplayListener(object : DisplayManager.DisplayListener {
                     override fun onDisplayAdded(id: Int) {}
                     override fun onDisplayRemoved(id: Int) {}
                     override fun onDisplayChanged(id: Int) {
                         if (id == Display.DEFAULT_DISPLAY) {
-                            val (nw, nh) = tamanoPantalla()
-                            reconfigurar(nw, nh)
+                            try {
+                                val (nw, nh) = tamanoPantalla()
+                                reconfigurar(nw, nh)
+                            } catch (e: Exception) {
+                                Diario.error("al girar", e)
+                            }
                         }
                     }
                 }, manejador)
             manejador.post(estadistica)
         } catch (e: Exception) {
             Log.e(TAG, "No se pudo arrancar", e)
+            Diario.error("al arrancar", e)
             estado = "Error: ${e.message}"
             stopSelf()
         }
@@ -137,59 +153,78 @@ class CaptureService : Service() {
     }
 
     /** Lado mayor a 1280 y múltiplos de 16 (lo piden muchos codificadores). */
-    private fun escalar(w: Int, h: Int): Pair<Int, Int> {
-        val f = minOf(1.0, LADO_MAYOR.toDouble() / max(w, h))
+    private fun escalar(w: Int, h: Int, ladoMayor: Int = LADO_MAYOR): Pair<Int, Int> {
+        val f = minOf(1.0, ladoMayor.toDouble() / max(w, h))
         fun r16(x: Double) = max(16, (x / 16).roundToInt() * 16)
         return r16(w * f) to r16(h * f)
     }
 
     private fun reconfigurar(w: Int, h: Int) {
-        val (aw, ah) = escalar(w, h)
-        if (aw == ancho && ah == alto) return
+        // Solo cambia la orientación: el tamaño ya escalado se compara girado.
+        if ((w > h) == (ancho > alto)) return
         val vd = pantalla ?: return
-        Log.i(TAG, "Nuevo tamaño $aw×$ah")
+        Diario.anotar("Giro: pantalla $w×$h")
         vd.surface = null
         pararCodificador()
-        val superficie = crearCodificador(aw, ah)
-        vd.resize(aw, ah, resources.displayMetrics.densityDpi)
+        val superficie = crearCodificador(w, h)
+        vd.resize(ancho, alto, resources.displayMetrics.densityDpi)
         vd.surface = superficie
     }
 
-    private fun crearCodificador(w: Int, h: Int): android.view.Surface {
-        fun formato(conPerfil: Boolean) = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
-            setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
-            setInteger(MediaFormat.KEY_FRAME_RATE, 30)
-            setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
-            // Si la pantalla no cambia, se repite el último fotograma (el coche sabe que seguimos vivos).
-            setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
-            setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-            if (Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-            if (conPerfil) {
-                setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
-                val macrobloques = (w / 16) * (h / 16)
-                setInteger(
-                    MediaFormat.KEY_LEVEL,
-                    if (macrobloques <= 3600) MediaCodecInfo.CodecProfileLevel.AVCLevel31 else MediaCodecInfo.CodecProfileLevel.AVCLevel4,
-                )
+    /**
+     * Prepara el compresor H.264 a partir del tamaño real de la pantalla. Cada móvil
+     * tiene el suyo y algunos rechazan ciertas opciones, así que se prueba de más a
+     * menos exigente hasta que uno arranca.
+     */
+    private fun crearCodificador(pw: Int, ph: Int): android.view.Surface {
+        val intentos = listOf(
+            Triple(LADO_MAYOR, true, true),
+            Triple(LADO_MAYOR, false, true),
+            Triple(LADO_MAYOR, false, false),
+            Triple(960, false, false),
+            Triple(720, false, false),
+        )
+        var ultimo: Exception? = null
+        for ((lado, conPerfil, extras) in intentos) {
+            val (w, h) = escalar(pw, ph, lado)
+            var c: MediaCodec? = null
+            try {
+                val f = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, w, h).apply {
+                    setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
+                    setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
+                    setInteger(MediaFormat.KEY_FRAME_RATE, 30)
+                    setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+                    if (extras) {
+                        // Si la pantalla no cambia, se repite el último fotograma (el coche sabe que seguimos vivos).
+                        setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
+                        setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                        if (Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
+                    }
+                    if (conPerfil) {
+                        setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
+                        setInteger(
+                            MediaFormat.KEY_LEVEL,
+                            if ((w / 16) * (h / 16) <= 3600) MediaCodecInfo.CodecProfileLevel.AVCLevel31 else MediaCodecInfo.CodecProfileLevel.AVCLevel4,
+                        )
+                    }
+                }
+                c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
+                c.configure(f, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                val superficie = c.createInputSurface()
+                c.start()
+                codificador = c
+                ancho = w
+                alto = h
+                Diario.anotar("Compresor ${c.name}: $w×$h" + (if (conPerfil) ", Baseline" else "") + (if (extras) "" else ", sin extras"))
+                vaciado = Thread({ vaciar(c) }, "codificador").also { it.start() }
+                return superficie
+            } catch (e: Exception) {
+                ultimo = e
+                Diario.error("compresor $w×$h" + (if (conPerfil) " Baseline" else "") + (if (extras) "" else " sin extras"), e)
+                try { c?.release() } catch (_: Exception) {}
             }
         }
-        var c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        try {
-            c.configure(formato(true), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        } catch (e: Exception) {
-            Log.w(TAG, "Sin perfil Baseline, se usa el del codificador", e)
-            c.release()
-            c = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-            c.configure(formato(false), null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        }
-        val superficie = c.createInputSurface()
-        c.start()
-        codificador = c
-        ancho = w
-        alto = h
-        vaciado = Thread({ vaciar(c) }, "codificador").also { it.start() }
-        return superficie
+        throw IllegalStateException("ningún ajuste del compresor funciona", ultimo)
     }
 
     private fun vaciar(c: MediaCodec) {
@@ -216,8 +251,9 @@ class CaptureService : Service() {
                 }
                 c.releaseOutputBuffer(i, false)
             }
-        } catch (e: IllegalStateException) {
-            // codificador parado mientras se leía
+        } catch (e: Exception) {
+            // Si se ha parado a propósito (giro o fin) no es un error.
+            if (codificador === c) Diario.error("compresor en marcha", e)
         }
     }
 
@@ -277,7 +313,8 @@ class CaptureService : Service() {
 
     override fun onDestroy() {
         activo = false
-        estado = "Parado"
+        Diario.anotar("Emisión terminada")
+        if (!estado.startsWith("Error")) estado = "Parado"
         if (::manejador.isInitialized) {
             manejador.removeCallbacksAndMessages(null)
             manejador.post {

@@ -28,6 +28,7 @@ class MainActivity : Activity() {
     private lateinit var direcciones: TextView
     private lateinit var estado: TextView
     private lateinit var boton: Button
+    private lateinit var diario: TextView
     private val reloj = Handler(Looper.getMainLooper())
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,6 +68,13 @@ class MainActivity : Activity() {
             text = "El móvil tiene que seguir desbloqueado: con la pantalla bloqueada Android no deja capturarla. " +
                 "Manejar el móvil o la pantalla del coche circulando es responsabilidad de quien conduce."
         })
+        raiz.addView(texto(13f).apply {
+            setTextColor(Color.rgb(154, 166, 178))
+            text = Diario.movil + " · app " + packageManager.getPackageInfo(packageName, 0).versionName
+        })
+        raiz.addView(texto(16f, true).apply { text = "Registro (si falla, haz una foto)" })
+        diario = texto(12f).apply { typeface = Typeface.MONOSPACE; setTextIsSelectable(true) }
+        raiz.addView(diario)
         val scroll = ScrollView(this).apply { addView(raiz, MATCH_PARENT, WRAP_CONTENT); setBackgroundColor(Color.rgb(20, 24, 29)) }
         // Desde Android 15 la app se dibuja bajo las barras del sistema.
         scroll.setOnApplyWindowInsetsListener { v, insets ->
@@ -95,6 +103,7 @@ class MainActivity : Activity() {
             direcciones.text = textoDirecciones()
             boton.text = if (CaptureService.activo) "Parar" else "Empezar"
             estado.text = CaptureService.estado
+            diario.text = Diario.texto()
             reloj.postDelayed(this, 1000)
         }
     }
@@ -114,6 +123,7 @@ class MainActivity : Activity() {
     }
 
     private fun empezar() {
+        Diario.anotar("—— Empezar (" + Diario.movil + ") ——")
         val mpm = getSystemService(MediaProjectionManager::class.java)
         @Suppress("DEPRECATION")
         startActivityForResult(mpm.createScreenCaptureIntent(), 1)
@@ -128,13 +138,18 @@ class MainActivity : Activity() {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != 1) return
         if (resultCode != RESULT_OK || data == null) {
+            Diario.anotar("Permiso de grabación rechazado")
             estado.text = "Sin permiso para grabar la pantalla."
             return
         }
-        startForegroundService(
+        try {
+            startForegroundService(
             Intent(this, CaptureService::class.java)
                 .putExtra(CaptureService.EXTRA_CODIGO, resultCode)
                 .putExtra(CaptureService.EXTRA_DATOS, data),
-        )
+            )
+        } catch (e: Exception) {
+            Diario.error("al iniciar el servicio", e)
+        }
     }
 }

@@ -93,9 +93,11 @@ Nombre provisional **EspejoCoche** (`es.mjtbapps.espejocoche`, sin «Tesla» por
 - `MainActivity.kt`: muestra las direcciones para el coche (la del punto de acceso primero) y el estado.
 - Página del coche: `docs/ver.html?ip=…` (pantalla completa, reconexión automática, fetch y si no WebSocket, fps, Mbps y retraso real captura → pantalla).
 
-Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.1.0-prueba.apk` (firma de depuración del iMac).
+Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.1.1-prueba.apk` (firma de depuración del iMac).
 
 Comprobado en el emulador (Android 14) el 10/11/2026: permiso, emisión, giro a horizontal y página en vivo (10–20 fps y 100–150 ms en el emulador, que codifica por software). Falta probarlo en un móvil real y en el coche.
+
+0.1.1 (11/11/2026): en el primer móvil real la grabación se paraba al segundo de empezar, sin decir por qué. Ahora la app guarda un registro de cada paso y de cualquier cierre (`Diario.kt`) y lo muestra en pantalla con el modelo del móvil; el compresor prueba varios ajustes (de 1280 con Baseline a 720 sin extras) y el giro ya no puede cerrar la app. Comprobado en el emulador de Android 16 con «Compartir toda la pantalla».
 
 Pendiente para Google Play: control táctil (servicio de accesibilidad), aviso al detectar el Bluetooth del coche, favorito con código y servidor de emparejamiento, nombre e icono definitivos.
 

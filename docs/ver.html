@@ -75,7 +75,8 @@ function codecDe(d) {
 let sesion = 0, recibiendo = false, desfaseMs = 0;
 let dec = null, spsActual = "", esperarClave = true;
 let cuenta = { fotos: 0, bytes: 0, retraso: 0, n: 0, t: performance.now() };
-let ultimoFoto = 0;
+let ultimoFoto = 0, dibujado = false;
+const repetidos = new Set();
 
 function nuevoDecodificador() {
   if (dec && dec.state !== "closed") dec.close();
@@ -85,7 +86,9 @@ function nuevoDecodificador() {
       ctx.drawImage(f, 0, 0);
       // Retraso: del momento de la captura en el móvil a dibujarlo aquí.
       const r = performance.now() - (f.timestamp / 1000 - desfaseMs);
-      if (r > 0 && r < 5000) { cuenta.retraso += r; cuenta.n++; }
+      if (repetidos.has(f.timestamp)) repetidos.delete(f.timestamp);
+      else if (r > 0 && r < 5000) { cuenta.retraso += r; cuenta.n++; }
+      dibujado = true;
       f.close();
       cuenta.fotos++; ultimoFoto = performance.now();
     },
@@ -93,7 +96,7 @@ function nuevoDecodificador() {
   });
 }
 
-function paquete(clave, ts, datos) {
+function paquete(clave, repetido, ts, datos) {
   if (clave) {
     const c = codecDe(datos);
     if (c && c.sps !== spsActual) {
@@ -105,7 +108,9 @@ function paquete(clave, ts, datos) {
     esperarClave = false;
   }
   if (esperarClave || !dec || dec.state !== "configured") return;
-  if (dec.decodeQueueSize > 8) { esperarClave = true; return; } // va atrasado: saltar al siguiente fotograma clave
+  // Va atrasado: saltar al siguiente fotograma clave (salvo los repetidos al conectar, que llegan de golpe).
+  if (!repetido && dec.decodeQueueSize > 8) { esperarClave = true; return; }
+  if (repetido) repetidos.add(ts);
   dec.decode(new EncodedVideoChunk({ type: clave ? "key" : "delta", timestamp: ts, data: datos }));
 }
 
@@ -121,7 +126,7 @@ function nuevoLector() {
       const largo = dv.getUint32(i);
       if (b.length - i - 4 < largo) break;
       const ts = Number(dv.getBigUint64(i + 5));
-      paquete(b[i + 4] === 1, ts, b.subarray(i + 13, i + 4 + largo));
+      paquete((b[i + 4] & 1) === 1, (b[i + 4] & 2) === 2, ts, b.subarray(i + 13, i + 4 + largo));
       i += 4 + largo;
     }
     resto = b.slice(i);
@@ -169,7 +174,7 @@ async function conectar() {
   try { localStorage.setItem("espejocoche_ip", ip); } catch (e) {}
   const mia = ++sesion;
   const base = "http://" + ip + ":" + PUERTO;
-  spsActual = ""; esperarClave = true;
+  spsActual = ""; esperarClave = true; dibujado = false; repetidos.clear();
   if (!("VideoDecoder" in window)) { pintarEstado("bad", "este navegador no tiene WebCodecs"); return; }
   nuevoDecodificador();
   while (mia === sesion) {
@@ -197,11 +202,12 @@ async function conectar() {
 setInterval(() => {
   const ahora = performance.now(), s = (ahora - cuenta.t) / 1000;
   const conImagen = ahora - ultimoFoto < 1500;
-  $("aviso").style.display = conImagen ? "none" : "";
+  // Con la pantalla del móvil quieta no llegan imágenes nuevas: se deja la última.
+  $("aviso").style.display = dibujado ? "none" : "";
   if (recibiendo) {
     const datos = " " + camino + " · " + (cuenta.fotos / s).toFixed(0) + " fps · " + (cuenta.bytes * 8 / 1e6 / s).toFixed(1) + " Mbps" +
       (cuenta.n ? " · retraso " + (cuenta.retraso / cuenta.n).toFixed(0) + " ms" : "") + " · " + lienzo.width + "×" + lienzo.height;
-    pintarEstado(conImagen ? "ok" : "warn", conImagen ? "en vivo" : "sin imagen", datos);
+    pintarEstado(conImagen || dibujado ? "ok" : "warn", conImagen ? "en vivo" : (dibujado ? "pantalla quieta" : "sin imagen"), datos);
   }
   cuenta = { fotos: 0, bytes: 0, retraso: 0, n: 0, t: ahora };
 }, 1000);

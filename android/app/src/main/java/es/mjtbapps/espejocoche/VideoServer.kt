@@ -23,7 +23,7 @@ import java.util.concurrent.atomic.AtomicLong
  * - GET /ws     → vídeo por WebSocket
  *
  * Cada paquete: 4 bytes de longitud (big endian, cuenta lo que sigue) + 1 byte
- * (1 = fotograma clave) + 8 bytes de marca de tiempo en µs + H.264 Annex B.
+ * (bit 1 = fotograma clave, bit 2 = repetido de la reserva) + 8 bytes de marca de tiempo en µs + H.264 Annex B.
  */
 class VideoServer(
     private val puerto: Int,
@@ -31,11 +31,19 @@ class VideoServer(
     private val tamano: () -> Pair<Int, Int>,
 ) {
     private class Cliente(val socket: Socket) {
-        val cola = ArrayBlockingQueue<ByteArray>(45)
+        val cola = ArrayBlockingQueue<ByteArray>(150)
         @Volatile var necesitaClave = true
     }
 
     private val clientes = CopyOnWriteArrayList<Cliente>()
+
+    /**
+     * Fotogramas desde el último clave. Si la pantalla está quieta, algunos móviles
+     * (MediaTek) no mandan nada nuevo, así que el coche que se conecta recibe estos
+     * para tener imagen enseguida.
+     */
+    private val reserva = ArrayList<ByteArray>()
+    private var reservaValida = false
     private var servidor: ServerSocket? = null
     val bytesEnviados = AtomicLong()
     val paquetesEnviados = AtomicLong()
@@ -64,10 +72,14 @@ class VideoServer(
     }
 
     /** Lo llama el codificador con cada fotograma. */
-    fun difundir(clave: Boolean, tiempoUs: Long, datos: ByteArray) {
-        if (clientes.isEmpty()) return
+    fun difundir(clave: Boolean, tiempoUs: Long, datos: ByteArray) = synchronized(reserva) {
         val paquete = ByteBuffer.allocate(13 + datos.size)
             .putInt(9 + datos.size).put(if (clave) 1 else 0).putLong(tiempoUs).put(datos).array()
+        if (clave) { reserva.clear(); reservaValida = true }
+        if (reservaValida) {
+            reserva.add(paquete)
+            if (reserva.size > 120) { reserva.clear(); reservaValida = false }
+        }
         for (c in clientes) {
             if (c.necesitaClave && !clave) continue
             c.necesitaClave = false
@@ -173,7 +185,14 @@ class VideoServer(
 
     private fun emitir(socket: Socket, escribir: (ByteArray) -> Unit) {
         val c = Cliente(socket)
-        clientes.add(c)
+        synchronized(reserva) {
+            if (reservaValida && reserva.isNotEmpty()) {
+                // Copia marcada como «repetida» (bit 2): el navegador no la descarta por retraso.
+                for (p in reserva) c.cola.offer(p.copyOf().also { it[4] = (it[4].toInt() or 2).toByte() })
+                c.necesitaClave = false
+            }
+            clientes.add(c)
+        }
         pedirClave()
         try {
             while (!socket.isClosed) {

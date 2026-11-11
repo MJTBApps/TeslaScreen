@@ -54,6 +54,7 @@ class CaptureService : Service() {
     private var pantalla: VirtualDisplay? = null
     private var codificador: MediaCodec? = null
     private var vaciado: Thread? = null
+    private var primerIntento = 0
     @Volatile private var ancho = 0
     @Volatile private var alto = 0
     private var servidor: VideoServer? = null
@@ -177,15 +178,25 @@ class CaptureService : Service() {
      * menos exigente hasta que uno arranca.
      */
     private fun crearCodificador(pw: Int, ph: Int): android.view.Surface {
+        // Extras: R = repetir el último fotograma si la pantalla no cambia (el más útil),
+        // B = sin fotogramas B, L = baja latencia. Algunos compresores (MediaTek con
+        // Android 11) rechazan alguno, así que se prueban por separado.
         val intentos = listOf(
-            Triple(LADO_MAYOR, true, true),
-            Triple(LADO_MAYOR, false, true),
-            Triple(LADO_MAYOR, false, false),
-            Triple(960, false, false),
-            Triple(720, false, false),
+            Triple(LADO_MAYOR, true, "RBL"),
+            Triple(LADO_MAYOR, false, "RBL"),
+            Triple(LADO_MAYOR, false, "RB"),
+            Triple(LADO_MAYOR, false, "RL"),
+            Triple(LADO_MAYOR, false, "R"),
+            Triple(LADO_MAYOR, false, "L"),
+            Triple(LADO_MAYOR, false, ""),
+            Triple(960, false, ""),
+            Triple(720, false, ""),
         )
         var ultimo: Exception? = null
-        for ((lado, conPerfil, extras) in intentos) {
+        // Tras el primer arranque se empieza por el ajuste que funcionó (al girar, por ejemplo).
+        for ((n, intento) in intentos.withIndex()) {
+            if (n < primerIntento) continue
+            val (lado, conPerfil, extras) = intento
             val (w, h) = escalar(pw, ph, lado)
             var c: MediaCodec? = null
             try {
@@ -194,12 +205,10 @@ class CaptureService : Service() {
                     setInteger(MediaFormat.KEY_BIT_RATE, 4_000_000)
                     setInteger(MediaFormat.KEY_FRAME_RATE, 30)
                     setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
-                    if (extras) {
-                        // Si la pantalla no cambia, se repite el último fotograma (el coche sabe que seguimos vivos).
-                        setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
-                        setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-                        if (Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
-                    }
+                    // Si la pantalla no cambia, se repite el último fotograma (el coche sabe que seguimos vivos).
+                    if ('R' in extras) setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 100_000)
+                    if ('B' in extras) setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
+                    if ('L' in extras && Build.VERSION.SDK_INT >= 30) setInteger(MediaFormat.KEY_LOW_LATENCY, 1)
                     if (conPerfil) {
                         setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileBaseline)
                         setInteger(
@@ -215,12 +224,13 @@ class CaptureService : Service() {
                 codificador = c
                 ancho = w
                 alto = h
-                Diario.anotar("Compresor ${c.name}: $w×$h" + (if (conPerfil) ", Baseline" else "") + (if (extras) "" else ", sin extras"))
+                primerIntento = n
+                Diario.anotar("Compresor ${c.name}: $w×$h" + (if (conPerfil) ", Baseline" else "") + ", extras «$extras»")
                 vaciado = Thread({ vaciar(c) }, "codificador").also { it.start() }
                 return superficie
             } catch (e: Exception) {
                 ultimo = e
-                Diario.error("compresor $w×$h" + (if (conPerfil) " Baseline" else "") + (if (extras) "" else " sin extras"), e)
+                Diario.error("compresor $w×$h" + (if (conPerfil) " Baseline" else "") + " extras «$extras»", e)
                 try { c?.release() } catch (_: Exception) {}
             }
         }

@@ -149,7 +149,7 @@ function nuevoReceptor() {
       while (b.length - i >= 13) {
         const largo = ((b[i] << 24) >>> 0) + (b[i + 1] << 16) + (b[i + 2] << 8) + b[i + 3];
         if (b.length - i - 4 < largo) break;
-        paquete(b[i + 4] === 1, b.subarray(i + 13, i + 4 + largo));
+        paquete((b[i + 4] & 1) === 1, b.subarray(i + 13, i + 4 + largo));
         i += 4 + largo;
       }
       resto = b.slice(i);

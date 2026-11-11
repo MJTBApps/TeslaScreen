@@ -114,7 +114,12 @@ class MainActivity : Activity() {
                 .filter { it.isUp && !it.isLoopback }
                 .flatMap { ni -> ni.inetAddresses.toList().filterIsInstance<Inet4Address>().map { ni.name to it.hostAddress!! } }
         } catch (_: Exception) { emptyList() }
-        if (ips.isEmpty()) return "Sin red: activa el punto de acceso."
+        // ccmni/rmnet/… son los datos móviles (IP del operador): el coche no llega por ahí.
+        val datos = Regex("^(ccmni|rmnet|v4-|clat|dummy|tun|p2p)")
+        val todas = ips
+        val ips = todas.filterNot { datos.containsMatchIn(it.first) }
+        if (ips.isEmpty()) return "No veo el punto de acceso: actívalo en Ajustes y conecta el coche a él.\n(Redes vistas: " +
+            todas.joinToString(", ") { "${it.first} ${it.second}" } + ")"
         // El punto de acceso suele llamarse ap0, swlan0, wlan1… y la IP acaba en .1.
         val ordenadas = ips.sortedByDescending { (n, ip) ->
             (if (Regex("^(ap|swlan|softap|wlan1)").containsMatchIn(n)) 2 else 0) + (if (ip.endsWith(".1")) 1 else 0)

@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EspejoCoche WebRTC</title>
+<style>
+:root{--bg:#000;--panel:rgba(20,24,29,.92);--line:#323a44;--fg:#eef1f4;--muted:#9aa6b2;--accent:#f07a2e;--ok:#5fd08a;--bad:#ff7a6e;--warn:#f2c35b}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);font:18px/1.4 system-ui,sans-serif;overflow:hidden}
+#lienzo{position:fixed;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+#barra{position:fixed;left:12px;right:12px;top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 14px}
+button{font:inherit;background:var(--line);color:var(--fg);border:0;border-radius:6px;padding:8px 16px;font-weight:600}
+#estado{color:var(--muted);flex:1 1 16em;font-variant-numeric:tabular-nums}
+#aviso{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;color:var(--muted);max-width:calc(100% - 32px)}
+#codigo{font-size:72px;font-weight:700;letter-spacing:.12em;color:var(--accent);display:block}
+video{position:fixed;width:2px;height:2px;opacity:0;pointer-events:none}
+</style>
+</head>
+<body>
+<canvas id="lienzo" width="16" height="9"></canvas>
+<video id="video" playsinline muted autoplay></video>
+<div id="aviso">En el móvil abre <b>mjtbapps.github.io/TeslaScreen/rtc-emisor.html</b> y escribe este código:<span id="codigo">······</span></div>
+<div id="barra"><button id="completa">Pantalla completa</button><span id="estado">preparando…</span></div>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+// Prueba sin servidor de reenvío: solo STUN de Google (conexión directa). Si falla, hará falta TURN.
+const ICE = [
+  { urls: "stun:stun.l.google.com:19302" },
+];
+const lienzo = $("lienzo"), ctx = lienzo.getContext("2d"), video = $("video");
+let fotos = 0, ultimo = 0, llamada = null, modo = "";
+const codigo = String(Math.floor(100000 + Math.random() * 900000));
+$("codigo").textContent = codigo;
+
+function estado(t) { $("estado").textContent = t; }
+
+function pintar(f, w, h) {
+  if (lienzo.width !== w || lienzo.height !== h) { lienzo.width = w; lienzo.height = h; }
+  ctx.drawImage(f, 0, 0); fotos++; ultimo = performance.now();
+  $("aviso").style.display = "none";
+}
+
+async function mostrar(stream) {
+  const pista = stream.getVideoTracks()[0];
+  // Circulando, el Tesla deja de dibujar <video>: se leen los fotogramas y se pintan en el lienzo.
+  if ("MediaStreamTrackProcessor" in window) {
+    modo = "lienzo (fotogramas)";
+    const lector = new MediaStreamTrackProcessor({ track: pista }).readable.getReader();
+    for (;;) {
+      const { value: f, done } = await lector.read();
+      if (done) break;
+      pintar(f, f.displayWidth, f.displayHeight); f.close();
+    }
+  } else {
+    modo = "lienzo (vídeo)";
+    video.srcObject = stream; video.play().catch(() => {});
+    const bucle = () => { if (video.videoWidth) pintar(video, video.videoWidth, video.videoHeight); requestAnimationFrame(bucle); };
+    bucle();
+  }
+}
+
+const peer = new Peer("espejocoche-" + codigo, { config: { iceServers: ICE } });
+peer.on("open", () => estado("esperando al móvil · código " + codigo));
+peer.on("error", e => estado("error: " + e.type + " " + e.message));
+peer.on("disconnected", () => { estado("reconectando con el servidor…"); peer.reconnect(); });
+peer.on("call", c => {
+  llamada = c;
+  c.answer();
+  estado("conectando…");
+  c.on("stream", s => mostrar(s));
+  c.on("close", () => { estado("el móvil ha colgado"); $("aviso").style.display = ""; });
+  c.peerConnection.addEventListener("iceconnectionstatechange", () => estado("conexión: " + c.peerConnection.iceConnectionState));
+});
+
+// Datos cada segundo: fps, tipo de camino (directo o reenviado) y retraso de red.
+setInterval(async () => {
+  const n = fotos; fotos = 0;
+  if (!llamada || !llamada.peerConnection) return;
+  let camino = "?", rtt = "", kbps = "";
+  try {
+    const st = await llamada.peerConnection.getStats();
+    let par = null; const loc = {};
+    st.forEach(r => {
+      if (r.type === "candidate-pair" && r.nominated && r.state === "succeeded") par = r;
+      if (r.type === "local-candidate") loc[r.id] = r;
+      if (r.type === "inbound-rtp" && r.kind === "video") {
+        const ant = window._b || 0; kbps = ((r.bytesReceived - ant) * 8 / 1000).toFixed(0) + " kbps"; window._b = r.bytesReceived;
+      }
+    });
+    if (par) {
+      const l = loc[par.localCandidateId];
+      camino = l ? (l.candidateType === "relay" ? "reenviado (" + (l.relayProtocol || l.protocol) + ")" : l.candidateType + " " + l.protocol) : "?";
+      if (par.currentRoundTripTime) rtt = " · red " + (par.currentRoundTripTime * 1000).toFixed(0) + " ms";
+    }
+  } catch (e) {}
+  const vivo = performance.now() - ultimo < 1500;
+  estado((vivo ? "en vivo" : "sin imagen") + " · " + n + " fps · " + kbps + " · " + camino + rtt + " · " + lienzo.width + "×" + lienzo.height + " · " + modo);
+}, 1000);
+
+$("completa").onclick = () => document.documentElement.requestFullscreen?.().catch(() => {});
+if ("wakeLock" in navigator) navigator.wakeLock.request("screen").catch(() => {});
+</script>
+</body>
+</html>

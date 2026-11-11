@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EspejoCoche emisor</title>
+<style>
+:root{--bg:#14181d;--line:#323a44;--fg:#eef1f4;--muted:#9aa6b2;--accent:#f07a2e}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:18px/1.4 system-ui,sans-serif;padding:16px}
+h1{font-size:24px;margin:0 0 8px}
+p{color:var(--muted);margin:6px 0 14px}
+input{font:inherit;font-size:32px;letter-spacing:.15em;width:100%;text-align:center;background:#0e1115;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:10px}
+button{font:inherit;width:100%;margin-top:12px;background:var(--accent);color:#111;border:0;border-radius:8px;padding:14px;font-weight:700}
+#estado{margin-top:14px;font-variant-numeric:tabular-nums}
+video{width:100%;margin-top:14px;border-radius:8px;background:#000}
+</style>
+</head>
+<body>
+<h1>EspejoCoche · prueba WebRTC</h1>
+<p>Envía la cámara del móvil al coche por Internet para probar la conexión. Escribe el código que sale en la pantalla del coche.</p>
+<input id="codigo" inputmode="numeric" maxlength="6" placeholder="000000">
+<button id="enviar">Enviar la cámara</button>
+<div id="estado"></div>
+<video id="video" playsinline muted autoplay></video>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+<script>
+"use strict";
+const $ = id => document.getElementById(id);
+const ICE = [
+  { urls: "stun:stun.l.google.com:19302" },
+];
+let peer = null;
+const estado = t => { $("estado").textContent = t; };
+
+$("enviar").onclick = async () => {
+  const codigo = $("codigo").value.trim();
+  if (!/^\d{6}$/.test(codigo)) { estado("El código tiene 6 cifras."); return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 30 } }, audio: false });
+  } catch (e) { estado("Sin permiso para la cámara: " + e.message); return; }
+  $("video").srcObject = stream;
+  if (peer) peer.destroy();
+  estado("conectando con el servidor…");
+  peer = new Peer({ config: { iceServers: ICE } });
+  peer.on("error", e => estado("error: " + e.type + " " + e.message));
+  peer.on("open", () => {
+    estado("llamando al coche…");
+    const c = peer.call("espejocoche-" + codigo, stream);
+    c.peerConnection.addEventListener("iceconnectionstatechange", () => estado("conexión: " + c.peerConnection.iceConnectionState));
+    c.on("close", () => estado("el coche ha colgado"));
+  });
+};
+</script>
+</body>
+</html>

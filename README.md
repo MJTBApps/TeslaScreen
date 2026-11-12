@@ -93,13 +93,19 @@ Nombre provisional **EspejoCoche** (`es.mjtbapps.espejocoche`, sin «Tesla» por
 - `MainActivity.kt`: muestra las direcciones para el coche (la del punto de acceso primero) y el estado.
 - Página del coche: `docs/ver.html?ip=…` (pantalla completa, reconexión automática, fetch y si no WebSocket, fps, Mbps y retraso real captura → pantalla).
 
-Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.1.5-prueba.apk` (firma de depuración del iMac).
+Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.2.0-prueba.apk` (firma de depuración del iMac).
 
 Comprobado en el emulador (Android 14) el 10/11/2026: permiso, emisión, giro a horizontal y página en vivo (10–20 fps y 100–150 ms en el emulador, que codifica por software). Falta probarlo en un móvil real y en el coche.
 
 0.1.1 (11/11/2026): en el primer móvil real la grabación se paraba al segundo de empezar, sin decir por qué. Ahora la app guarda un registro de cada paso y de cualquier cierre (`Diario.kt`) y lo muestra en pantalla con el modelo del móvil; el compresor prueba varios ajustes (de 1280 con Baseline a 720 sin extras) y el giro ya no puede cerrar la app. Comprobado en el emulador de Android 16 con «Compartir toda la pantalla».
 
 0.1.2 (11/11/2026): primer móvil real, **Xiaomi Redmi Note 10 5G (M2103K19G, MediaTek, Android 11)**. Su compresor `OMX.MTK.VIDEO.ENCODER.AVC` rechaza el perfil Baseline y alguno de los extras (repetir fotograma, sin B, baja latencia): ahora se prueban de uno en uno. Como sin «repetir fotograma» la pantalla quieta no manda nada, el servidor guarda los fotogramas desde el último clave y se los manda al coche que se conecta (marcados como repetidos, bit 2 del byte de banderas), y `ver.html` conserva la última imagen («pantalla quieta»).
+
+0.1.3–0.1.5 (11/11/2026): diagnóstico en el coche. **El Tesla no deja que su navegador conecte con ningún aparato de su propia wifi** (ERR_CONNECTION_REFUSED en 8765, 80, 443, 8080, 8443, 8000, 8888, 3000 y 5000, mientras un iPhone en la misma wifi sí llega). El Xiaomi usa `ap0` con IP 10.x para su punto de acceso. La conexión local queda descartada.
+
+Prueba WebRTC (11–12/11/2026, `docs/rtc-ver.html` + `docs/rtc-emisor.html`, cámara del móvil): sin servidor de reenvío falla; **con TURN de ExpressTURN (plan gratuito, 1.000 GB/mes, puerto 3478) funciona aparcado y en marcha** (13 fps con poca luz, red 210 ms, el Tesla sale por UDP y solo el móvil usa el reenvío). El emparejamiento usa el servidor público de PeerJS. Los datos de TURN se escriben en el móvil y no están en el repositorio.
+
+0.2.0 (12/11/2026): la app envía la **pantalla por WebRTC** (`stream-webrtc-android` 1.3.10, `ScreenCapturerAndroid`) y se empareja con `rtc-ver.html` por el código de 6 cifras (`Senal.kt`, protocolo de PeerJS). Datos de TURN en la propia app (se guardan solo en el móvil). Aviso de responsabilidad al abrirla la primera vez. Solo arm64-v8a y x86_64. Comprobado en el emulador hasta la respuesta del coche (sin TURN el emulador no conecta).
 
 Pendiente para Google Play: control táctil (servicio de accesibilidad), aviso al detectar el Bluetooth del coche, favorito con código y servidor de emparejamiento, nombre e icono definitivos.
 

@@ -57,3 +57,14 @@ class App : Application() {
         }
     }
 }
+
+/** Ajustes guardados solo en el móvil (nunca en el repositorio). */
+object Ajustes {
+    private fun p(ctx: Context) = ctx.getSharedPreferences("ajustes", Context.MODE_PRIVATE)
+    fun turn(ctx: Context): Pair<String, String> = p(ctx).let { (it.getString("turn_u", "") ?: "") to (it.getString("turn_p", "") ?: "") }
+    fun guardarTurn(ctx: Context, u: String, c: String) = p(ctx).edit().putString("turn_u", u).putString("turn_p", c).apply()
+    fun coche(ctx: Context) = p(ctx).getString("coche", "") ?: ""
+    fun guardarCoche(ctx: Context, c: String) = p(ctx).edit().putString("coche", c).apply()
+    fun avisoAceptado(ctx: Context) = p(ctx).getBoolean("aviso", false)
+    fun aceptarAviso(ctx: Context) = p(ctx).edit().putBoolean("aviso", true).apply()
+}

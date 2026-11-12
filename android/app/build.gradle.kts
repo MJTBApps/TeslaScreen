@@ -13,8 +13,10 @@ android {
         applicationId = "es.mjtbapps.espejocoche"
         minSdk = 30
         targetSdk = 36
-        versionCode = 6
-        versionName = "0.1.5"
+        versionCode = 7
+        versionName = "0.2.0"
+        // Solo móviles de 64 bits (casi todos) y el emulador: la APK pesa la mitad.
+        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
 
     compileOptions {
@@ -24,4 +26,11 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
+}
+
+dependencies {
+    // WebRTC (compilación de libwebrtc de Stream, en Maven Central).
+    implementation("io.getstream:stream-webrtc-android:1.3.10")
+    // WebSocket para el emparejamiento.
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

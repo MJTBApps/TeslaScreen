@@ -70,7 +70,11 @@ peer.on("call", c => {
   llamada = c;
   c.answer();
   estado("conectando…");
-  c.on("stream", s => mostrar(s));
+  c.on("stream", s => {
+    // Lo antes posible: sin colchón de reproducción (el sonido va por Bluetooth y se adelanta).
+    for (const r of c.peerConnection.getReceivers()) { try { r.playoutDelayHint = 0; r.jitterBufferTarget = 0; } catch (e) {} }
+    mostrar(s);
+  });
   c.on("close", () => { estado("el móvil ha colgado"); $("aviso").style.display = ""; });
   c.peerConnection.addEventListener("iceconnectionstatechange", () => estado("conexión: " + c.peerConnection.iceConnectionState));
 });

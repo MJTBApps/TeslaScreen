@@ -9,7 +9,10 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.hardware.display.DisplayManager
 import android.media.projection.MediaProjection
+import android.media.projection.MediaProjectionManager
+import android.view.Display
 import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
@@ -26,7 +29,6 @@ import org.webrtc.PeerConnectionFactory
 import org.webrtc.RtpParameters
 import org.webrtc.RtpReceiver
 import org.webrtc.RtpTransceiver
-import org.webrtc.ScreenCapturerAndroid
 import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.SurfaceTextureHelper
@@ -61,7 +63,8 @@ class CaptureService : Service() {
     private lateinit var manejador: Handler
     private var egl: EglBase? = null
     private var fabrica: PeerConnectionFactory? = null
-    private var capturador: ScreenCapturerAndroid? = null
+    private var capturador: Capturador? = null
+    private var proyeccion: MediaProjection? = null
     private var ayudante: SurfaceTextureHelper? = null
     private var fuente: VideoSource? = null
     private var pista: VideoTrack? = null
@@ -100,7 +103,7 @@ class CaptureService : Service() {
         hilo = HandlerThread("rtc").also { it.start() }
         manejador = Handler(hilo.looper)
         bloqueo = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-            .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "EspejoCoche:emision").also { it.acquire(4 * 60 * 60 * 1000L) }
+            .newWakeLock(@Suppress("DEPRECATION") PowerManager.SCREEN_DIM_WAKE_LOCK, "EspejoCoche:emision").also { it.acquire(4 * 60 * 60 * 1000L) }
         manejador.post { arrancar(datos) }
         return START_NOT_STICKY
     }
@@ -126,9 +129,13 @@ class CaptureService : Service() {
             escalar(r.width(), r.height())
             Diario.anotar("Pantalla del móvil: ${r.width()}×${r.height()} → envío $ancho×$alto")
 
-            val cap = ScreenCapturerAndroid(datos, object : MediaProjection.Callback() {
+            val mpm = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val proy = mpm.getMediaProjection(Activity.RESULT_OK, datos) ?: throw IllegalStateException("sin proyección")
+            proyeccion = proy
+            proy.registerCallback(object : MediaProjection.Callback() {
                 override fun onStop() { Diario.anotar("Android ha parado la grabación"); stopSelf() }
-            })
+            }, manejador)
+            val cap = Capturador(proy, resources.displayMetrics.densityDpi)
             capturador = cap
             val ay = SurfaceTextureHelper.create("captura", e.eglBaseContext).also { ayudante = it }
             val fu = f.createVideoSource(true).also { fuente = it }
@@ -136,6 +143,21 @@ class CaptureService : Service() {
             cap.startCapture(ancho, alto, 30)
             pista = f.createVideoTrack("pantalla", fu)
             Diario.anotar("Captura en marcha")
+            // Al girar el móvil se envía en horizontal (si no, el vídeo sale diminuto en un marco vertical).
+            (getSystemService(Context.DISPLAY_SERVICE) as DisplayManager).registerDisplayListener(object : DisplayManager.DisplayListener {
+                override fun onDisplayAdded(id: Int) {}
+                override fun onDisplayRemoved(id: Int) {}
+                override fun onDisplayChanged(id: Int) {
+                    if (id != Display.DEFAULT_DISPLAY) return
+                    val b = wm.maximumWindowMetrics.bounds
+                    val (aw, ah) = ancho to alto
+                    escalar(b.width(), b.height())
+                    if (aw != ancho || ah != alto) {
+                        Diario.anotar("Giro: envío $ancho×$alto")
+                        cap.changeCaptureFormat(ancho, alto, 30)
+                    }
+                }
+            }, manejador)
 
             estado = "Buscando el coche (código $coche)…"
             senal = Senal(
@@ -186,12 +208,12 @@ class CaptureService : Service() {
             encodings.forEach { it.maxBitrateBps = 3_000_000; it.maxFramerate = 30 }
         }
         pc.createOffer(object : Sdp() {
-            override fun onCreateSuccess(d: SessionDescription) {
+            override fun onCreateSuccess(d: SessionDescription) = seguro {
                 pc.setLocalDescription(Sdp(), d)
                 val sdp = JSONObject().put("type", "offer").put("sdp", d.description)
                 senal?.enviar("OFFER", "espejocoche-$coche", base().put("sdp", sdp).put("browser", "android"))
             }
-            override fun onCreateFailure(e: String?) = fallo("oferta: $e")
+            override fun onCreateFailure(e: String?) { manejador.post { fallo("oferta: $e") } }
         }, MediaConstraints())
     }
 
@@ -214,16 +236,16 @@ class CaptureService : Service() {
     }
 
     private val observador = object : PeerConnection.Observer {
-        override fun onIceCandidate(c: IceCandidate) {
+        override fun onIceCandidate(c: IceCandidate) = seguro {
             val j = JSONObject().put("candidate", c.sdp).put("sdpMid", c.sdpMid).put("sdpMLineIndex", c.sdpMLineIndex)
             senal?.enviar("CANDIDATE", "espejocoche-$coche", base().put("candidate", j))
         }
-        override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) {
+        override fun onIceConnectionChange(s: PeerConnection.IceConnectionState) = seguro {
+            if (!activo) return@seguro
             Diario.anotar("Conexión: $s")
             when (s) {
                 PeerConnection.IceConnectionState.FAILED -> estado = "No se ha podido conectar (revisa el servidor de reenvío)"
                 PeerConnection.IceConnectionState.DISCONNECTED -> estado = "Conexión perdida, reintentando…"
-                PeerConnection.IceConnectionState.CLOSED -> stopSelf()
                 else -> {}
             }
         }
@@ -239,6 +261,9 @@ class CaptureService : Service() {
         override fun onTrack(t: RtpTransceiver) {}
     }
 
+    /** Nada de excepciones hacia el código nativo de WebRTC. */
+    private inline fun seguro(f: () -> Unit) { try { f() } catch (e: Throwable) { Diario.error("WebRTC", e) } }
+
     private open class Sdp : SdpObserver {
         override fun onCreateSuccess(d: SessionDescription) {}
         override fun onSetSuccess() {}
@@ -250,7 +275,7 @@ class CaptureService : Service() {
         override fun run() {
             val pc = conexion
             if (pc != null && pc.iceConnectionState() in setOf(PeerConnection.IceConnectionState.CONNECTED, PeerConnection.IceConnectionState.COMPLETED)) {
-                pc.getStats { informe ->
+                pc.getStats { informe -> seguro {
                     var bytes = 0L; var fotos = 0L; var camino = ""
                     for (s in informe.statsMap.values) {
                         if (s.type == "outbound-rtp") {
@@ -262,7 +287,7 @@ class CaptureService : Service() {
                     val kbps = (bytes - ultimosBytes) * 8 / 1000
                     estado = "Emitiendo al coche $coche$camino\n$ancho×$alto · ${fotos - ultimosFotos} fps · $kbps kbps"
                     ultimosBytes = bytes; ultimosFotos = fotos
-                }
+                } }
             }
             manejador.postDelayed(this, 1000)
         }
@@ -295,7 +320,7 @@ class CaptureService : Service() {
                 try { senal?.cerrar() } catch (_: Exception) {}
                 try { conexion?.dispose() } catch (_: Exception) {}
                 try { capturador?.stopCapture() } catch (_: Exception) {}
-                try { capturador?.dispose() } catch (_: Exception) {}
+                try { proyeccion?.stop() } catch (_: Exception) {}
                 try { pista?.dispose(); fuente?.dispose(); ayudante?.dispose() } catch (_: Exception) {}
                 try { fabrica?.dispose(); egl?.release() } catch (_: Exception) {}
                 hilo.quitSafely()

@@ -13,8 +13,8 @@ android {
         applicationId = "es.mjtbapps.espejocoche"
         minSdk = 30
         targetSdk = 36
-        versionCode = 8
-        versionName = "0.2.1"
+        versionCode = 9
+        versionName = "0.3.0"
         // Solo móviles de 64 bits (casi todos) y el emulador: la APK pesa la mitad.
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }

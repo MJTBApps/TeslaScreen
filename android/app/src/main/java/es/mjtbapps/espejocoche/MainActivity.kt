@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var turnP: EditText
     private lateinit var estado: TextView
     private lateinit var boton: Button
+    private lateinit var tactil: Button
     private lateinit var diario: TextView
     private val reloj = Handler(Looper.getMainLooper())
 
@@ -73,6 +74,23 @@ class MainActivity : Activity() {
         raiz.addView(boton, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
         estado = texto(16f)
         raiz.addView(estado)
+        tactil = Button(this).apply {
+            textSize = 16f
+            setOnClickListener {
+                if (Tactil.activo(this@MainActivity)) return@setOnClickListener
+                AlertDialog.Builder(this@MainActivity)
+                    .setTitle("Control táctil desde el coche")
+                    .setMessage(
+                        "Para tocar el móvil desde la pantalla del coche, Android pide activar un permiso de accesibilidad.\n\n" +
+                            "En la pantalla que se abre, busca «EspejoCoche» (a veces dentro de «Apps descargadas» o «Servicios instalados») " +
+                            "y actívalo.\n\nSolo se usa para hacer los toques que llegan del coche: no lee ni guarda lo que hay en pantalla."
+                    )
+                    .setPositiveButton("Abrir Ajustes") { _, _ -> startActivity(Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                    .setNegativeButton("Ahora no", null)
+                    .show()
+            }
+        }
+        raiz.addView(tactil, LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT))
 
         // Datos del servidor de reenvío (ExpressTURN): se guardan solo en el móvil.
         val (u, p) = Ajustes.turn(this)
@@ -139,6 +157,7 @@ class MainActivity : Activity() {
         override fun run() {
             boton.text = if (CaptureService.activo) "Parar" else "Empezar"
             estado.text = CaptureService.estado
+            tactil.text = if (Tactil.activo(this@MainActivity)) "Control táctil: activado ✓" else "Activar el control táctil"
             diario.text = Diario.texto()
             reloj.postDelayed(this, 1000)
         }

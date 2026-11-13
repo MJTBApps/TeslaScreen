@@ -93,7 +93,7 @@ Nombre provisional **EspejoCoche** (`es.mjtbapps.espejocoche`, sin «Tesla» por
 - `MainActivity.kt`: muestra las direcciones para el coche (la del punto de acceso primero) y el estado.
 - Página del coche: `docs/ver.html?ip=…` (pantalla completa, reconexión automática, fetch y si no WebSocket, fps, Mbps y retraso real captura → pantalla).
 
-Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.2.1-prueba.apk` (firma de depuración del iMac).
+Compilar: `cd android && JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home sh gradlew --no-daemon :app:assembleDebug` (copiar antes `.gradle-dist` de OpoAlert o dejar que lo descargue). La APK de prueba se publica en `docs/EspejoCoche-0.3.0-prueba.apk` (firma de depuración del iMac).
 
 Comprobado en el emulador (Android 14) el 10/11/2026: permiso, emisión, giro a horizontal y página en vivo (10–20 fps y 100–150 ms en el emulador, que codifica por software). Falta probarlo en un móvil real y en el coche.
 
@@ -108,6 +108,8 @@ Prueba WebRTC (11–12/11/2026, `docs/rtc-ver.html` + `docs/rtc-emisor.html`, c�
 0.2.0 (12/11/2026): la app envía la **pantalla por WebRTC** (`stream-webrtc-android` 1.3.10, `ScreenCapturerAndroid`) y se empareja con `rtc-ver.html` por el código de 6 cifras (`Senal.kt`, protocolo de PeerJS). Datos de TURN en la propia app (se guardan solo en el móvil). Aviso de responsabilidad al abrirla la primera vez. Solo arm64-v8a y x86_64. Comprobado en el emulador hasta la respuesta del coche (sin TURN el emulador no conecta).
 
 0.2.1 (13/11/2026), tras la primera prueba real (funciona): **gira a horizontal** (`Capturador.kt`, una sola pantalla virtual con `resize`; antes los vídeos horizontales salían diminutos), **pantalla del móvil encendida** mientras emite (`SCREEN_DIM_WAKE_LOCK`), `rtc-ver.html` pide retraso mínimo de reproducción (`playoutDelayHint`/`jitterBufferTarget` = 0) y se corrige un cierre al terminar (excepciones en llamadas nativas de WebRTC). Pendiente: control táctil, sonido por Bluetooth adelantado a la imagen, Google Maps no se ve al grabar (Waze sí).
+
+0.3.0 (13/11/2026): **control táctil desde el coche**. `rtc-ver.html` manda los toques (posición 0–1 descontando las franjas negras) y los botones Atrás / Inicio / Apps por un canal de datos WebRTC negociado (id 0). En el móvil, `Tactil.kt` es un servicio de accesibilidad (solo gestos, `canRetrieveWindowContent=false`; tiene que ser `exported="true"` o Android no lo enlaza) que reproduce el gesto al levantar el dedo: toque, pulsación larga (>0,5 s) o arrastre con su recorrido. La barra del coche se esconde a los 5 s y vuelve con ☰. Comprobado en el emulador que el servicio se enlaza; los toques reales, pendientes de probar en el coche.
 
 Pendiente para Google Play: control táctil (servicio de accesibilidad), aviso al detectar el Bluetooth del coche, favorito con código y servidor de emparejamiento, nombre e icono definitivos.
 

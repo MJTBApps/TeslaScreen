@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">EspejoCoche (prueba)</string>
+    <string name="tactil_descripcion">Permite tocar la pantalla del móvil desde la pantalla del coche mientras EspejoCoche emite. Solo hace los toques que llegan del coche; no lee ni guarda lo que hay en pantalla.</string>
 </resources>

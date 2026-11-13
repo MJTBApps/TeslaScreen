@@ -69,6 +69,8 @@ class CaptureService : Service() {
     private var fuente: VideoSource? = null
     private var pista: VideoTrack? = null
     private var conexion: PeerConnection? = null
+    private var canal: org.webrtc.DataChannel? = null
+    @Volatile private var avisoTactil = false
     private var senal: Senal? = null
     private var bloqueo: PowerManager.WakeLock? = null
     private var coche = ""
@@ -201,6 +203,19 @@ class CaptureService : Service() {
         }
         val pc = f.createPeerConnection(cfg, observador) ?: return fallo("no se pudo crear la conexión WebRTC")
         conexion = pc
+        // Canal de datos para los toques del coche (negociado, id 0, igual que en rtc-ver.html).
+        canal = pc.createDataChannel("tactil", org.webrtc.DataChannel.Init().apply { negotiated = true; id = 0; ordered = true })
+        canal?.registerObserver(object : org.webrtc.DataChannel.Observer {
+            override fun onBufferedAmountChange(p: Long) {}
+            override fun onStateChange() = seguro { Diario.anotar("Canal táctil: ${canal?.state()}") }
+            override fun onMessage(b: org.webrtc.DataChannel.Buffer) = seguro {
+                val bytes = ByteArray(b.data.remaining()).also { b.data.get(it) }
+                val m = JSONObject(String(bytes))
+                val t = Tactil.instancia
+                if (t == null) { if (!avisoTactil) { avisoTactil = true; Diario.anotar("Toque recibido, pero el control táctil no está activado") } }
+                else android.os.Handler(android.os.Looper.getMainLooper()).post { try { t.mensaje(m) } catch (e: Exception) { Diario.error("toque", e) } }
+            }
+        })
         val emisor = pc.addTrack(pista, listOf("espejo"))
         // Pantalla: mejor bajar fotogramas que resolución (texto de mapas legible).
         emisor.parameters = emisor.parameters.apply {
@@ -318,6 +333,7 @@ class CaptureService : Service() {
             manejador.removeCallbacksAndMessages(null)
             manejador.post {
                 try { senal?.cerrar() } catch (_: Exception) {}
+                try { canal?.unregisterObserver(); canal?.dispose() } catch (_: Exception) {}
                 try { conexion?.dispose() } catch (_: Exception) {}
                 try { capturador?.stopCapture() } catch (_: Exception) {}
                 try { proyeccion?.stop() } catch (_: Exception) {}
